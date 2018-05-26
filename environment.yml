@@ -1,0 +1,12 @@
+name: forex 
+dependencies:
+- python=3
+- numpy
+- pandas
+- seaborn
+- matplotlib
+- jupyter
+- scikit-learn
+- PyYAML
+- tabulate
+- ujson
