@@ -13,7 +13,7 @@ def fetch_candle(instrument, **kwargs):
         '443',
         token='38a9bcc1dc54e3e9cf7b50fb7a79c386-ae7eb6b66ed6c7e47b5cbb757e6bc9bc')
 
-    response = api.instrument.candles(instrument, granularity='D', count=200)
+    response = api.instrument.candles(instrument, **kwargs)
 
     j = json.loads(response.raw_body)
     ohlc = pd.io.json.json_normalize(j['candles'])
