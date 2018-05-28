@@ -10,3 +10,7 @@ dependencies:
 - PyYAML
 - tabulate
 - ujson
+- v20
+- bokeh
+- backtrader
+
