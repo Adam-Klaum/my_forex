@@ -1,19 +1,27 @@
 import v20
 import pandas as pd
 import oa_config
-from datetime import datetime
+from datetime import date, datetime, timedelta
 
 
-def add_sma(df, period, column, name):
+class Account:
 
-    df[name] = df[column].rolling(window=period).mean()
+    def __init__(self, balance):
+        self.balance = balance
+
+
+def add_sma(df, period):
+
+    df['bid_' + str(period) + '_sma'] = df['bid_close'].rolling(window=period).mean()
+    df['ask_' + str(period) + '_sma'] = df['ask_close'].rolling(window=period).mean()
 
     return df
 
 
-def add_ema(df, period, column, name):
+def add_ema(df, period):
 
-    df[name] = df[column].ewm(span=period, adjust=False).mean()
+    df['bid_' + str(period) + '_ema'] = df['bid_close'].ewm(span=period, adjust=False).mean()
+    df['ask_' + str(period) + '_ema'] = df['ask_close'].ewm(span=period, adjust=False).mean()
 
     return df
 
@@ -152,7 +160,7 @@ def live_feed(instrument):
     print(candle_df)
 
 
-def history(instrument):
+def get_history(inst, **kwargs):
 
     oa_cf = oa_config.OAConf()
 
@@ -175,10 +183,7 @@ def history(instrument):
 
     df_index = 0
 
-    response = oa_api.instrument.candles(instrument=instrument,
-                                         granularity='M1',
-                                         price='BA',
-                                         count=2000)
+    response = oa_api.instrument.candles(instrument=inst, **kwargs)
 
     if response.status != 200:
         print(response)
@@ -207,16 +212,138 @@ def history(instrument):
     return candle_df
 
 
+def save_history_range(inst, output, start_date, end_date, **kwargs):
+
+    date_range = [start_date + timedelta(days=x) for x in range((end_date - start_date).days + 1)]
+
+    temp_frames = []
+
+    for day in date_range:
+
+        from_time = str(day) + 'T00:00:00Z'
+        to_time = str(day) + 'T23:59:59Z'
+
+        temp_frames.append(get_history(inst,
+                                       fromTime=from_time,
+                                       toTime=to_time,
+                                       **kwargs))
+
+        print(day)
+
+    candle_df = pd.concat(temp_frames, ignore_index=True)
+
+    candle_df.to_csv('EUR_USD.csv')
+
+
+class Strategy:
+
+    def __init__(self, name, data_file, indicators, risk_pct, account, signal_func,
+                 start_date, end_date, trade_start_hour, trade_end_hour,
+                 start_buffer, end_buffer, lot_size):
+
+        self.name = name
+        self.indicators = indicators
+        self.risk_pct = risk_pct
+        self.account = account
+        self.signal_func = signal_func
+        self.start_date = start_date
+        self.end_date = end_date
+        self.trade_start_hour = trade_start_hour
+        self.trade_end_hour = trade_end_hour
+        self.start_buffer = start_buffer
+        self.end_buffer = end_buffer
+        self.lot_size = lot_size
+        self.data_file = data_file
+        self.df = pd.DataFrame()
+
+    def load_history(self):
+        self.df = pd.read_csv(self.data_file)
+
+    def add_indicators(self):
+
+        for key, value in self.indicators.items():
+
+            self.df = key(self.df, **value)
+
+
+def ma_55_20_cross(ind, prev_state):
+    """
+    prev_state state signal
+    -----------------------
+    *   L     |  H  | BUY
+        L     |  L  | HOLD
+        L     |  X  | HOLD
+    *   H     |  L  | SELL
+        H     |  H  | HOLD
+        H     |  X  | HOLD
+    *   X     |  L  | SELL
+    *   X     |  H  | BUY
+        X     |  X  | HOLD
+
+    :param ind:
+    :param prev_state:
+    :return:
+    """
+
+    if ind['20_ema'] > ind['55_ma']:
+        state = 'H'
+
+    elif ind['20_ema'] < ind['55_ma']:
+        state = 'L'
+
+    else:
+        state = 'X'
+
+    if (prev_state == 'L' and state == 'H') or (prev_state == 'X' and state == 'H'):
+        return 'BUY', state
+
+    elif (prev_state == 'H' and state == 'L') or (prev_state == 'X' and state == 'L'):
+        return 'SELL', state
+
+    else:
+        return 'HOLD', state
+
+
 def main():
 
-    live_feed('EUR_USD')
+    account = Account(2500)
 
-    # candle_df = history('EUR_USD')
-    # candle_df = add_sma(candle_df, 55, 'bid_close', 'bid_sma_55')
-    # candle_df = add_sma(candle_df, 55, 'ask_close', 'ask_sma_55')
-    # candle_df = add_ema(candle_df, 20, 'bid_close', 'bid_ema_20')
-    # candle_df = add_ema(candle_df, 20, 'ask_close', 'ask_ema_20')
-    # print(candle_df)
+    strategy_001 = Strategy('1 min 55 SMA 20 EMA Cross',
+                            'EUR_USD_2017.csv',
+                            {add_sma: {'period': 55},
+                             add_ema: {'period': 20}},
+                            .01,
+                            account,
+                            ma_55_20_cross,
+                            '2017-01-01',
+                            '2017-12-31',
+                            7,
+                            20,
+                            1,
+                            0,
+                            10000)
+
+    strategy_001.load_history()
+    strategy_001.add_indicators()
+    print(strategy_001.df)
+
+
+    # save_history_range('EUR_USD',
+    #                    'EUR_USD_2012.csv',
+    #                    date(2012, 1, 1),
+    #                    date(2012, 12, 31),
+    #                    granularity='M1',
+    #                    price='BA')
+
+
+    #live_feed('EUR_USD')
+
+
+#    candle_df = add_sma(candle_df, 55, 'bid_close', 'bid_sma_55')
+#    candle_df = add_sma(candle_df, 55, 'ask_close', 'ask_sma_55')
+#    candle_df = add_ema(candle_df, 20, 'bid_close', 'bid_ema_20')
+#    candle_df = add_ema(candle_df, 20, 'ask_close', 'ask_ema_20')
+#    print(candle_df)
 
 
 if __name__ == "__main__":
