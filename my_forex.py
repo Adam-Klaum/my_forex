@@ -5,7 +5,7 @@ import pandas as pd
 import bokeh.plotting as bpl
 from bokeh.io import curdoc
 from bokeh.themes import Theme
-from bokeh.models import HoverTool, CrosshairTool, Span, Label, Arrow, NormalHead
+from bokeh.models import HoverTool, CrosshairTool, Span, Label, Arrow, NormalHead, VeeHead
 from math import pi
 
 
@@ -40,6 +40,11 @@ def fetch_candle(instrument, **kwargs):
 
 
 def plot_candle(df, bid_ask):
+
+    # TODO 1. Document Code
+    # TODO 2. Put Theme in a file
+    # TODO 3. Parameterize the indicators (i.e. ema)
+    # TODO 4. General cleanup
 
     curdoc().theme = Theme(json={'attrs': {
 
@@ -147,7 +152,7 @@ def plot_candle(df, bid_ask):
         end = row['bid_20_ema'] - .0003
         seq = row['seq']
 
-        arrow = Arrow(end=NormalHead(fill_color="green", size=15),
+        arrow = Arrow(end=VeeHead(fill_color="green", size=15),
                       x_start=seq, y_start=start, x_end=seq, y_end=end)
 
 #        signal_label = Label(x=seq, y=540, y_units='screen', text='BUY',
@@ -161,7 +166,7 @@ def plot_candle(df, bid_ask):
         end = row['bid_20_ema'] + .0003
         seq = row['seq']
 
-        arrow = Arrow(end=NormalHead(fill_color="red", size=15),
+        arrow = Arrow(end=VeeHead(fill_color="red", size=15),
                       x_start=seq, y_start=start, x_end=seq, y_end=end)
 
 #        signal_label = Label(x=seq, y=540, y_units='screen', text='BUY',
