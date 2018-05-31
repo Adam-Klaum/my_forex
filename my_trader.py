@@ -10,6 +10,52 @@ class Account:
         self.balance = balance
 
 
+class Strategy:
+
+    def __init__(self, name, data_file, indicators, risk_pct, account, signal_func,
+                 start_date, end_date, trade_start_hour, trade_end_hour,
+                 start_buffer, end_buffer, lot_size):
+
+        self.name = name
+        self.indicators = indicators
+        self.risk_pct = risk_pct
+        self.account = account
+        self.signal_func = signal_func
+        self.start_date = start_date
+        self.end_date = end_date
+        self.trade_start_hour = trade_start_hour
+        self.trade_end_hour = trade_end_hour
+        self.start_buffer = start_buffer
+        self.end_buffer = end_buffer
+        self.lot_size = lot_size
+        self.data_file = data_file
+        self.df = pd.DataFrame()
+
+    def load_history(self):
+
+        self.df = pd.read_csv(self.data_file, index_col=0)
+        self.df['signal'] = 'HOLD'
+        self.df['datetime'] = pd.to_datetime(self.df['datetime'])
+        self.df.set_index('datetime', drop=True, inplace=True)
+        self.df = self.df.between_time(self.trade_start_hour, self.trade_end_hour)
+
+    def add_indicators(self):
+
+        for key, value in self.indicators.items():
+
+            self.df = key(self.df, **value)
+
+    def run_strategy(self):
+
+        prev_state = -1
+
+        for index, row in self.df.iterrows():
+
+            signal_data = {'20_ema': row['bid_20_ema'], '55_sma': row['bid_55_sma']}
+            signal, prev_state = self.signal_func(signal_data, prev_state)
+            self.df.at[index, 'signal'] = signal
+
+
 def add_sma(df, period):
 
     df['bid_' + str(period) + '_sma'] = df['bid_close'].rolling(window=period).mean()
@@ -232,38 +278,7 @@ def save_history_range(inst, output, start_date, end_date, **kwargs):
 
     candle_df = pd.concat(temp_frames, ignore_index=True)
 
-    candle_df.to_csv('EUR_USD.csv')
-
-
-class Strategy:
-
-    def __init__(self, name, data_file, indicators, risk_pct, account, signal_func,
-                 start_date, end_date, trade_start_hour, trade_end_hour,
-                 start_buffer, end_buffer, lot_size):
-
-        self.name = name
-        self.indicators = indicators
-        self.risk_pct = risk_pct
-        self.account = account
-        self.signal_func = signal_func
-        self.start_date = start_date
-        self.end_date = end_date
-        self.trade_start_hour = trade_start_hour
-        self.trade_end_hour = trade_end_hour
-        self.start_buffer = start_buffer
-        self.end_buffer = end_buffer
-        self.lot_size = lot_size
-        self.data_file = data_file
-        self.df = pd.DataFrame()
-
-    def load_history(self):
-        self.df = pd.read_csv(self.data_file)
-
-    def add_indicators(self):
-
-        for key, value in self.indicators.items():
-
-            self.df = key(self.df, **value)
+    candle_df.to_csv(output)
 
 
 def ma_55_20_cross(ind, prev_state):
@@ -285,10 +300,10 @@ def ma_55_20_cross(ind, prev_state):
     :return:
     """
 
-    if ind['20_ema'] > ind['55_ma']:
+    if ind['20_ema'] > ind['55_sma']:
         state = 'H'
 
-    elif ind['20_ema'] < ind['55_ma']:
+    elif ind['20_ema'] < ind['55_sma']:
         state = 'L'
 
     else:
@@ -325,8 +340,7 @@ def main():
 
     strategy_001.load_history()
     strategy_001.add_indicators()
-    print(strategy_001.df)
-
+    strategy_001.run_strategy()
 
     # save_history_range('EUR_USD',
     #                    'EUR_USD_2012.csv',
