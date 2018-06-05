@@ -1,7 +1,8 @@
 import yaml
 from pathlib import Path
 
-class OAConf:
+
+class OAConf(object):
 
     def __init__(self):
 

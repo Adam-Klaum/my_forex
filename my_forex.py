@@ -5,7 +5,7 @@ import pandas as pd
 import bokeh.plotting as bpl
 from bokeh.io import curdoc
 from bokeh.themes import Theme
-from bokeh.models import HoverTool, CrosshairTool, Span, Label, Arrow, NormalHead, VeeHead
+from bokeh.models import CrosshairTool, Span, Label, Arrow, VeeHead
 from math import pi
 
 
@@ -75,53 +75,58 @@ def plot_candle(df, bid_ask):
     }})
 
     if bid_ask == 'ask':
-        open = 'ask_open'
-        high = 'ask_high'
-        low = 'ask_low'
-        close = 'ask_close'
+        op = 'ask_open'
+        hi = 'ask_high'
+        lo = 'ask_low'
+        cl = 'ask_close'
 
     else:
-        open = 'bid_open'
-        high = 'bid_high'
-        low = 'bid_low'
-        close = 'bid_close'
+        op = 'bid_open'
+        hi = 'bid_high'
+        lo = 'bid_low'
+        cl = 'bid_close'
 
-    inc = df[close] > df[open]
-    dec = df[open] > df[close]
+    inc = df[cl] > df[op]
+    dec = df[op] > df[cl]
     w = 0.70
 
     df['seq'] = np.arange(df.shape[0])
-#    df['seq'] = df.index
-    df['mid'] = df.apply(lambda x: (x[open] + x[close]) / 2, axis=1)
-    df['height'] = df.apply(lambda x: abs(x[close] - x[open] if x[close] != x[open] else 0.00001), axis=1)
+    df['mid'] = df.apply(lambda x: (x[op] + x[cl]) / 2, axis=1)
+    df['height'] = df.apply(lambda x: abs(x[cl] - x[op] if x[cl] != x[op] else 0.00001), axis=1)
 
 
     # use ColumnDataSource to pass in data for tooltips
-    source_inc = bpl.ColumnDataSource(bpl.ColumnDataSource.from_df(df.loc[inc]))
-    source_dec = bpl.ColumnDataSource(bpl.ColumnDataSource.from_df(df.loc[dec]))
+    # source_inc = bpl.ColumnDataSource(bpl.ColumnDataSource.from_df(df.loc[inc]))
+    # source_dec = bpl.ColumnDataSource(bpl.ColumnDataSource.from_df(df.loc[dec]))
 
-    # the values for the tooltip come from ColumnDataSource
-    hover = HoverTool(
-        tooltips=[
-            ("date", "@date"),
-            ("open", "@o"),
-            ("close", "@c")
-        ]
-    )
+    # # the values for the tooltip come from ColumnDataSource
+    # hover = HoverTool(
+    #     tooltips=[
+    #         ("date", "@date"),
+    #         ("open", "@o"),
+    #         ("close", "@c")
+    #     ]
+    # )
 
-    TOOLS = [CrosshairTool(), hover, 'wheel_zoom', 'reset', 'xpan']
+    # TOOLS = [CrosshairTool(), hover, 'wheel_zoom', 'reset', 'xpan']
+    TOOLS = [CrosshairTool(), 'wheel_zoom', 'reset', 'xpan']
     p = bpl.figure(plot_width=1200, plot_height=600, tools=TOOLS, x_range=(0,200))
     p.xaxis.major_label_orientation = pi / 4
     p.grid.grid_line_alpha = 0.3
 
     # this is the up tail
-    p.segment(df.seq[inc], df[high][inc], df.seq[inc], df[low][inc], color="#909090")
+    p.segment(df.seq[inc], df[hi][inc], df.seq[inc], df[lo][inc], color="#909090")
     # this is the bottom tail
-    p.segment(df.seq[dec], df[high][dec], df.seq[dec], df[low][dec], color="#909090")
-    # this is the candle body for the red dates
-    p.rect(x='seq', y='mid', width=w, height='height', fill_color="#b20000", line_color="#909090", source=source_inc)
-    # this is the candle body for the green dates
-    p.rect(x='seq', y='mid', width=w, height='height', fill_color="#00b200", line_color="#909090", source=source_dec)
+    p.segment(df.seq[dec], df[hi][dec], df.seq[dec], df[lo][dec], color="#909090")
+
+    # red candles
+    p.rect(x=df['seq'][dec], y=df['mid'][dec], width=w, height=df['height'][dec],
+           fill_color="#b20000", line_color="#909090")
+
+    # green candles
+    p.rect(x=df['seq'][inc], y=df['mid'][inc], width=w, height=df['height'][inc],
+           fill_color="#00b200", line_color="#909090")
+
     p.line(df.seq, df['bid_55_sma'])
     p.line(df.seq, df['bid_20_ema'], line_color='yellow')
 
@@ -155,9 +160,6 @@ def plot_candle(df, bid_ask):
         arrow = Arrow(end=VeeHead(fill_color="green", size=15),
                       x_start=seq, y_start=start, x_end=seq, y_end=end)
 
-#        signal_label = Label(x=seq, y=540, y_units='screen', text='BUY',
-#                             border_line_color='black', background_fill_color='black', text_color='green')
-
         p.add_layout(arrow)
 
     for index, row in sell_signals.iterrows():
@@ -169,19 +171,6 @@ def plot_candle(df, bid_ask):
         arrow = Arrow(end=VeeHead(fill_color="red", size=15),
                       x_start=seq, y_start=start, x_end=seq, y_end=end)
 
-#        signal_label = Label(x=seq, y=540, y_units='screen', text='BUY',
-#                             border_line_color='black', background_fill_color='black', text_color='green')
-
         p.add_layout(arrow)
-
-
-    #day_df = df[df.index.hour == 7]
-
-    # for index, row in day_df.iterrows():
-    #
-    #     day_start = Span(location=index,
-    #                      dimension='height', line_color='green',
-    #                      line_dash='dashed', line_width=3)
-    #     p.add_layout(day_start)
 
     return p

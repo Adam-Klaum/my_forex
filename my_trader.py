@@ -1,7 +1,7 @@
 import v20
 import pandas as pd
 import oa_config
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 
 
 class Account:
@@ -10,13 +10,150 @@ class Account:
         self.balance = balance
 
 
+class Candle:
+
+    def __init__(self, dt, bid_open, bid_high, bid_low, bid_close,
+                 ask_open, ask_high, ask_low, ask_close, spread):
+
+        self.dt = dt
+        self.bid_open = bid_open
+        self.bid_high = bid_high
+        self.bid_low = bid_low
+        self.bid_close = bid_close
+        self.ask_open = ask_open
+        self.ask_high = ask_high
+        self.ask_low = ask_low
+        self.ask_close = ask_close
+        self.spread = spread
+
+
+class Trade:
+
+    # TODO add per pip price calculation, for now assuming all lots are 10000
+
+    def __init__(self, trade_type, lot_size, stop_type, profit_type, candle,
+                 risk_pips, reward_pips):
+
+        self.start_date = candle.dt
+        self.end_date = candle.dt
+        self.trade_type = trade_type
+        self.lot_size = lot_size
+        self.spread = candle.spread
+        self.stop_type = stop_type
+        self.profit_type = profit_type
+
+        if trade_type == 'BUY':
+            self.order_price = candle.ask_close
+        if trade_type == 'SELL':
+            self.order_price = candle.bid_close
+
+        self.close_price = 0
+
+        self.risk_pips = risk_pips
+        self.reward_pips = reward_pips
+
+        if trade_type == 'BUY':
+            self.risk_price = candle.ask_close - self.risk_pips / 10000
+            self.reward_price = candle.ask_close + self.reward_pips / 10000
+
+        if trade_type == 'SELL':
+            self.risk_price = candle.bid_close + self.risk_pips / 10000
+            self.reward_price = candle.bid_close - self.reward_pips / 10000
+
+        self.status = 'open'
+        self.profit_loss = 0
+        self.commission = candle.spread
+        self.close_type = ''
+        self.prev_risk_price = 0
+
+    def update(self, candle):
+
+        # TODO add in functionality for trailing stop
+        # Every time the price moves in a profitable direction adjust the trailing stop
+        # Do this by adjusting the risk_price variable
+        # Is the change from the last candle in our favor?  Then update the stop
+
+        if self.stop_type == 'trailing':
+
+            if self.trade_type == 'BUY':
+                self.risk_price = candle.ask_high - self.risk_pips / 10000
+                if self.prev_risk_price and self.risk_price < self.prev_risk_price:
+                    self.risk_price = self.prev_risk_price
+
+            if self.trade_type == 'SELL':
+                self.risk_price = candle.bid_low + self.risk_pips / 10000
+                if self.prev_risk_price and self.risk_price > self.prev_risk_price:
+                    self.risk_price = self.prev_risk_price
+
+        if self.trade_type == 'BUY':
+
+            # taking profit
+            if candle.ask_low <= self.reward_price <= candle.ask_high:
+
+                if self.profit_type == 'flat':
+                    self.close(candle, 'PROFIT')
+                    return
+
+                if self.profit_type == 'trailing':
+                    self.risk_price = candle.ask_close
+                    self.prev_risk_price = self.risk_price
+                    return
+
+            # getting stopped out
+            if candle.ask_low <= self.risk_price <= candle.ask_high:
+                self.close(candle, 'STOP')
+                return
+
+        if self.trade_type == 'SELL':
+
+            # taking profit
+            if candle.bid_low <= self.reward_price <= candle.bid_high:
+
+                if self.profit_type == 'flat':
+                    self.close(candle, 'PROFIT')
+                    return
+
+                if self.profit_type == 'trailing':
+                    self.risk_price = candle.bid_close
+                    self.prev_risk_price = self.risk_price
+                    return
+
+            # getting stopped out
+            if candle.bid_low <= self.risk_price <= candle.bid_high:
+                self.close(candle, 'STOP')
+                return
+
+        self.prev_risk_price = self.risk_price
+
+    def close(self, candle, close_type):
+
+        self.commission += candle.spread
+        self.status = 'closed'
+        self.end_date = candle.dt
+        self.close_type = close_type
+
+        if self.trade_type == 'BUY':
+
+            self.close_price = candle.ask_close
+            self.profit_loss = 10000 * (self.close_price - self.order_price) - self.commission
+
+        if self.trade_type == 'SELL':
+
+            self.close_price = candle.bid_close
+            self.profit_loss = 10000 * (self.order_price - self.close_price) - self.commission
+        return
+
+
 class Strategy:
 
     def __init__(self, name, data_file, indicators, risk_pct, account, signal_func,
                  start_date, end_date, trade_start_hour, trade_end_hour,
-                 start_buffer, end_buffer, lot_size):
+                 start_buffer, end_buffer, lot_size, risk_pips, reward_pips):
+
+        # TODO risk_pips and reward pips should be a function of account size and risk_pct
 
         self.name = name
+        self.data_file = data_file
         self.indicators = indicators
         self.risk_pct = risk_pct
         self.account = account
@@ -28,7 +165,8 @@ class Strategy:
         self.start_buffer = start_buffer
         self.end_buffer = end_buffer
         self.lot_size = lot_size
-        self.data_file = data_file
+        self.risk_pips = risk_pips
+        self.reward_pips = reward_pips
         self.df = pd.DataFrame()
 
     def load_history(self):
@@ -45,15 +183,84 @@ class Strategy:
 
             self.df = key(self.df, **value)
 
+        # TODO for testing only, remove later
+        self.df = self.df.iloc[-4000:]
+
     def run_strategy(self):
+
+        # TODO add functionality to close all trades if trading window is over
 
         prev_state = -1
 
+        active_trades = []
+        closed_trades = []
+
+        # main loop through all candles
         for index, row in self.df.iterrows():
+
+            candle = Candle(index,
+                            row['bid_open'],
+                            row['bid_high'],
+                            row['bid_low'],
+                            row['bid_close'],
+                            row['ask_open'],
+                            row['ask_high'],
+                            row['ask_low'],
+                            row['ask_close'],
+                            row['spread'])
+
+            for trade_idx, trade in enumerate(active_trades):
+
+                if trade.status == 'closed':
+
+                    closed_trades.append(trade)
+                    # TODO is this actually working?
+                    del(active_trades[trade_idx])
 
             signal_data = {'20_ema': row['bid_20_ema'], '55_sma': row['bid_55_sma']}
             signal, prev_state = self.signal_func(signal_data, prev_state)
             self.df.at[index, 'signal'] = signal
+
+            # TODO parameterize stop type
+
+            if signal != 'HOLD':
+
+                if len(active_trades) < 4:
+
+                    trade = Trade(signal,
+                                  10000,
+                                  'trailing',
+                                  'trailing',
+                                  candle,
+                                  self.risk_pips,
+                                  self.reward_pips)
+
+                    active_trades.append(trade)
+
+            for trade in active_trades:
+
+                # TODO parameterize the EOD
+
+                if index.hour == 19 and index.minute == 59:
+
+                    trade.close(candle, 'EOD')
+
+                trade.update(candle)
+
+        # active_df = pd.DataFrame(columns=closed_trades[0].__dict__.keys())
+        #
+        # for trade_idx, trade in enumerate(active_trades):
+        #     active_df.loc[trade_idx] = list(trade.__dict__.values())
+        #
+        # print(active_df)
+        #
+        trade_df = pd.DataFrame(columns=closed_trades[0].__dict__.keys())
+
+        for trade_idx, trade in enumerate(closed_trades):
+
+            trade_df.loc[trade_idx] = list(trade.__dict__.values())
+
+        return trade_df
 
 
 def add_sma(df, period):
@@ -68,6 +275,42 @@ def add_ema(df, period):
 
     df['bid_' + str(period) + '_ema'] = df['bid_close'].ewm(span=period, adjust=False).mean()
     df['ask_' + str(period) + '_ema'] = df['ask_close'].ewm(span=period, adjust=False).mean()
+
+    return df
+
+
+def add_atr(df, period):
+
+
+    # Method 1: Current High less the current Low
+    # Method 2: Current High less the previous Close (absolute value)
+    # Method 3: Current Low less the previous Close (absolute value)
+    #
+
+    def calc_bid_tr(row):
+
+        bid_tr = max([row['bid_high'] - row['bid_low'],
+                      abs(row['bid_high'] - row['bid_prev_close']),
+                      abs(row['bid_low'] - row['bid_prev_close'])])
+
+        return bid_tr
+
+    def calc_ask_tr(row):
+
+        ask_tr = max([row['ask_high'] - row['ask_low'],
+                      abs(row['ask_high'] - row['ask_prev_close']),
+                      abs(row['ask_low'] - row['ask_prev_close'])])
+
+        return ask_tr
+
+    df['bid_prev_close'] = df['bid_close'].shift(1)
+    df['ask_prev_close'] = df['ask_close'].shift(1)
+
+    df['bid_tr'] = df.apply(calc_bid_tr, axis=1)
+    df['ask_tr'] = df.apply(calc_ask_tr, axis=1)
+
+    df['bid_atr'] = df['bid_tr'].rolling(window=period).mean()
+    df['ask_atr'] = df['ask_tr'].rolling(window=period).mean()
 
     return df
 
