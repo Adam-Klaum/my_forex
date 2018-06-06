@@ -5,6 +5,8 @@ import config
 
 def main():
 
+    # TODO move logging setup to a file
+
     # Setting up global logger
     logfile = 'trade_agent.log'
 
@@ -31,7 +33,7 @@ def main():
 
     print(fx_info['EUR_USD']['pip_mult'])
 
-    oa_conf = config.OAConf('/home/aklaum/v20.conf')
+    oa_api = config.init_oa_api(config.OAConf('/home/aklaum/v20.conf'))
 
 
 if __name__ == "__main__":

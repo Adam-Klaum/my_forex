@@ -1,7 +1,7 @@
 import yaml
 import json
 import logging
-from pathlib import Path
+import v20
 
 logger = logging.getLogger('trade_agent.config')
 
@@ -45,3 +45,15 @@ class OAConf(object):
             self.c_list.append(key)
 
         self.logger.info('Oanda config values retrieved')
+
+
+def init_oa_api(oa_conf):
+
+    logger.info('Initializing Oanda streaming API')
+
+    oa_api = v20.Context(oa_conf.streaming_hostname,
+                         oa_conf.port,
+                         token=oa_conf.token)
+
+    return oa_api
+

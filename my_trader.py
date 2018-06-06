@@ -1,6 +1,5 @@
 import v20
 import pandas as pd
-import oa_config
 from datetime import datetime, timedelta
 
 
