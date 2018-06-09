@@ -8,6 +8,23 @@ import trade_candle
 
 
 def live_feed(inst, oa_api, oa_cfg, tick_queue, log_queue, feed_pipe_c):
+    """
+
+    Connects to the Oanda v20 API and initiates a stream of quotes for
+    the specified instrument. Each tick received from Oanda is put on
+    the tick_queue for further processing.
+
+    :param inst: the forex instrument to retrieve (i.e. EUR_USD)
+    :param oa_api: a previously initiated Oanda API object
+    :param oa_cfg: an object containing Oanda configuration attributes
+    :param tick_queue: this function writes each quote to this queue
+    :param log_queue: a general log queue
+    :param feed_pipe_c: an IPC pipe to talk to the main process
+    :return: None
+
+    """
+
+    # TODO capture timeout error
 
     log_queue.put(['INFO', 'live_feed', 'Starting live feed...'])
 
@@ -15,12 +32,16 @@ def live_feed(inst, oa_api, oa_cfg, tick_queue, log_queue, feed_pipe_c):
                                      snapshot=False,
                                      instruments=inst)
 
+    # if the stream call gets back anything but 200 throw and error and exit
     if response.status != 200:
         log_queue.put(['ERROR', 'live_feed', 'Oanda API call returned - ' + str(response.status)])
         feed_pipe_c.send('FATAL')
         return
 
+    # main loop for retrieving tick data
     for msg_type, msg in response.parts():
+
+        # if a KILL message is received from the main process then exit
         if feed_pipe_c.poll():
             msg = feed_pipe_c.recv()
             if msg == 'KILL':
@@ -31,8 +52,24 @@ def live_feed(inst, oa_api, oa_cfg, tick_queue, log_queue, feed_pipe_c):
 
 
 def candlestick_maker(inst, tick_queue, event_queue, log_queue, candle_pipe_c):
+    """
 
-    # TODO add logging, log tick if DEBUG is set
+    Creates standard OHLC candlesticks from tick data.  Tick data is retrieved from the
+    tick_queue and stored in a pandas dataframe.  Once the specified timeframe has passed,
+    calculations are made on the dataframe to create OHLC values and a candle is sent to
+    the event_queue for further processing.
+
+    :param inst:
+    :param tick_queue:
+    :param event_queue:
+    :param log_queue:
+    :param candle_pipe_c:
+    :return: None
+
+    """
+
+    # TODO add a parameter to control the timeframe of the candle
+    # TODO the inst parameter shouldn't be needed, that data should be part of the tick msg
 
     log_queue.put(['INFO', 'candlestick_maker', 'Starting candle maker ...'])
 
@@ -45,6 +82,8 @@ def candlestick_maker(inst, tick_queue, event_queue, log_queue, candle_pipe_c):
     last_m1 = -1
 
     while True:
+
+        # Checking for messages from the main process
         if candle_pipe_c.poll():
             msg = candle_pipe_c.recv()
             if msg == 'KILL':
@@ -53,6 +92,7 @@ def candlestick_maker(inst, tick_queue, event_queue, log_queue, candle_pipe_c):
         while not tick_queue.empty():
 
             msg = tick_queue.get()
+
             date_part, minute, _ = msg.time.split(':')
             minute = int(minute)
 
@@ -109,6 +149,15 @@ def candlestick_maker(inst, tick_queue, event_queue, log_queue, candle_pipe_c):
 
 
 def log_handler(log_queue, log_pipe_c):
+    """
+    Process to handle logging to a file.  All other processes send their log messages to
+    this one.
+
+    :param log_queue: queue for all incoming log message
+    :param log_pipe_c: pipe to communicate with the main process
+    :return: None
+
+    """
 
     log_levels = {'CRITICAL': 50,
                   'ERROR': 40,
@@ -203,7 +252,6 @@ def main():
                     log_queue.put(['ERROR', 'main', 'FATAL received! Exiting...'])
                     for p_pipe in parent_pipes:
                         p_pipe.send('KILL')
-
                     for proc in all_procs:
                         proc.join()
 
