@@ -5,6 +5,30 @@ import multiprocessing
 from datetime import datetime
 import pandas as pd
 import trade_candle
+import time
+
+
+def hist_feed(inst, hist_file, log_queue, feed_pipe_c):
+
+    log_queue.put(['INFO', 'live_feed', 'Loading history data for - ' + inst])
+    hist_df = pd.read_csv(hist_file)
+
+    test = 0
+
+    for row in hist_df.itertuples():
+
+        if test == 9:
+            feed_pipe_c.send('FATAL')
+            return
+
+        if feed_pipe_c.poll():
+            msg = feed_pipe_c.recv()
+            if msg == 'KILL':
+                return
+
+        print(row)
+        time.sleep(1)
+        test += 1
 
 
 def live_feed(inst, oa_api, oa_cfg, tick_queue, log_queue, feed_pipe_c):
@@ -32,7 +56,7 @@ def live_feed(inst, oa_api, oa_cfg, tick_queue, log_queue, feed_pipe_c):
                                      snapshot=False,
                                      instruments=inst)
 
-    # if the stream call gets back anything but 200 throw and error and exit
+    # if the stream call gets back anything but 200 throw an error and exit
     if response.status != 200:
         log_queue.put(['ERROR', 'live_feed', 'Oanda API call returned - ' + str(response.status)])
         feed_pipe_c.send('FATAL')
@@ -228,16 +252,28 @@ def main():
 
     log_proc = multiprocessing.Process(target=log_handler, args=(log_queue, log_pipe_c))
 
-    candle_proc = multiprocessing.Process(target=candlestick_maker,
-                                          args=('EUR_USD', tick_queue, event_queue, log_queue, candle_pipe_c))
+    # TODO parameterize this and the instruments below
+    go_live = 0
 
-    feed_proc = multiprocessing.Process(target=live_feed,
-                                        args=('EUR_USD', oa_api, oa_cfg, tick_queue, log_queue, feed_pipe_c))
+    if go_live:
 
-    all_procs = [candle_proc, feed_proc, log_proc]
+        feed_proc = multiprocessing.Process(target=live_feed,
+                                            args=('EUR_USD', oa_api, oa_cfg, tick_queue, log_queue, feed_pipe_c))
+
+        candle_proc = multiprocessing.Process(target=candlestick_maker,
+                                              args=('EUR_USD', tick_queue, event_queue, log_queue, candle_pipe_c))
+
+        all_procs = [candle_proc, feed_proc, log_proc]
+
+        candle_proc.start()
+
+    else:
+        feed_proc = multiprocessing.Process(target=hist_feed,
+                                            args=('EUR_USD',  'data/EUR_USD_2017_M1.csv', log_queue, feed_pipe_c))
+
+        all_procs = [feed_proc, log_proc]
 
     log_proc.start()
-    candle_proc.start()
     feed_proc.start()
 
     while True:
