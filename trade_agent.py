@@ -6,15 +6,17 @@ from datetime import datetime
 import pandas as pd
 import trade_candle
 import time
+import sys
 
 
 def hist_feed(inst, hist_file, log_queue, feed_pipe_c):
 
-    log_queue.put(['INFO', 'live_feed', 'Loading history data for - ' + inst])
+    log_queue.put(['INFO', 'hist_feed', 'Loading history data for - ' + inst])
     hist_df = pd.read_csv(hist_file)
 
     test = 0
 
+    # itertuples is faster than iterlist?
     for row in hist_df.itertuples():
 
         if test == 9:
@@ -52,9 +54,18 @@ def live_feed(inst, oa_api, oa_cfg, tick_queue, log_queue, feed_pipe_c):
 
     log_queue.put(['INFO', 'live_feed', 'Starting live feed...'])
 
-    response = oa_api.pricing.stream(oa_cfg.active_account,
-                                     snapshot=False,
-                                     instruments=inst)
+    try:
+
+        response = oa_api.pricing.stream(oa_cfg.active_account,
+                                         snapshot=False,
+                                         instruments=inst)
+
+    # TODO why is this not in scope?
+    except V20ConnectionError:
+
+        log_queue.put(['ERROR', 'live_feed', 'connection error'])
+        feed_pipe_c.send('FATAL')
+        return
 
     # if the stream call gets back anything but 200 throw an error and exit
     if response.status != 200:
@@ -226,9 +237,22 @@ def log_handler(log_queue, log_pipe_c):
                 return
 
 
+def cleanup(parent_pipes, all_procs, log_queue):
+
+    print('starting cleanup')
+    log_queue.put(['INFO', 'main', 'Sending the KILL signal to child processes...'])
+    for p_pipe in parent_pipes:
+        print(p_pipe)
+        p_pipe.send('KILL')
+    for proc in all_procs:
+        print('joining')
+        proc.join()
+
+    sys.exit(0)
+
+
 def main():
 
-    # TODO how to implement this in queues
     # Retrieving data for each forex instrument
     fx_info = trade_config.init_fx_info('fx_inst.json')
 
@@ -248,11 +272,11 @@ def main():
     candle_pipe_p, candle_pipe_c = multiprocessing.Pipe(duplex=True)
     feed_pipe_p, feed_pipe_c = multiprocessing.Pipe(duplex=True)
 
-    parent_pipes = [log_pipe_p, candle_pipe_p, feed_pipe_p]
 
     log_proc = multiprocessing.Process(target=log_handler, args=(log_queue, log_pipe_c))
 
     # TODO parameterize this and the instruments below
+    # TODO make this section more pythonic
     go_live = 0
 
     if go_live:
@@ -264,6 +288,7 @@ def main():
                                               args=('EUR_USD', tick_queue, event_queue, log_queue, candle_pipe_c))
 
         all_procs = [candle_proc, feed_proc, log_proc]
+        parent_pipes = [log_pipe_p, candle_pipe_p, feed_pipe_p]
 
         candle_proc.start()
 
@@ -272,26 +297,34 @@ def main():
                                             args=('EUR_USD',  'data/EUR_USD_2017_M1.csv', log_queue, feed_pipe_c))
 
         all_procs = [feed_proc, log_proc]
+        parent_pipes = [log_pipe_p, feed_pipe_p]
 
     log_proc.start()
     feed_proc.start()
 
+    # TODO use "import daemon" to manage all of this
+    # TODO Need a graceful exit code from child processes in addition to FATAL
+
     while True:
 
-        # Checking all child proc pipes for incoming messages
-        for pipe in parent_pipes:
-            if pipe.poll():
-                msg = pipe.recv()
+        try:
+            # Checking all child proc pipes for incoming messages
+            for pipe in parent_pipes:
+                if pipe.poll():
+                    msg = pipe.recv()
 
-                # If any child proc sends a FATAL message, kill all the others and exit
-                if msg == 'FATAL':
-                    log_queue.put(['ERROR', 'main', 'FATAL received! Exiting...'])
-                    for p_pipe in parent_pipes:
-                        p_pipe.send('KILL')
-                    for proc in all_procs:
-                        proc.join()
+                    # If any child proc sends a FATAL message, kill all the others and exit
+                    if msg == 'FATAL':
+                        log_queue.put(['ERROR', 'main', 'FATAL received! Exiting...'])
+                        sys.exit(0)
 
-                    exit(1)
+        except SystemExit:
+            print('caught system exit')
+            cleanup(parent_pipes, all_procs, log_queue)
+
+        except KeyboardInterrupt:
+            cleanup(parent_pipes, all_procs, log_queue)
+            sys.exit(0)
 
 
 if __name__ == "__main__":
