@@ -5,11 +5,21 @@ import multiprocessing
 from datetime import datetime
 import pandas as pd
 import trade_candle
-import time
 import sys
+from curses import wrapper
 
 
-def hist_feed(inst, hist_file, log_queue, feed_pipe_c):
+def hist_feed(inst, hist_file, log_queue, feed_pipe_c, event_queue):
+    """
+    Opens the passed in file and processes the candlestick data within
+
+    :param inst: the forex instrument
+    :param hist_file: the file containing historic candlestick data
+    :param log_queue: the master log queue
+    :param feed_pipe_c: an IPC pipe to talk to the main process
+    :param event_queue: main queue for processing all events
+    :return: None
+    """
 
     log_queue.put(['INFO', 'hist_feed', 'Loading history data for - ' + inst])
     hist_df = pd.read_csv(hist_file)
@@ -19,8 +29,23 @@ def hist_feed(inst, hist_file, log_queue, feed_pipe_c):
     # itertuples is faster than iterlist?
     for row in hist_df.itertuples():
 
+        candle = trade_candle.Candle(row.datetime,
+                                     row.instrument,
+                                     'M1',
+                                     row.bid_open,
+                                     row.bid_high,
+                                     row.bid_low,
+                                     row.bid_close,
+                                     row.ask_open,
+                                     row.ask_high,
+                                     row.ask_low,
+                                     row.ask_close
+                                     )
+
+        event_queue.put(candle)
+
         if test == 9:
-            feed_pipe_c.send('FATAL')
+#            feed_pipe_c.send('FATAL')
             return
 
         if feed_pipe_c.poll():
@@ -28,8 +53,7 @@ def hist_feed(inst, hist_file, log_queue, feed_pipe_c):
             if msg == 'KILL':
                 return
 
-        print(row)
-        time.sleep(1)
+        #time.sleep(1)
         test += 1
 
 
@@ -44,7 +68,7 @@ def live_feed(inst, oa_api, oa_cfg, tick_queue, log_queue, feed_pipe_c):
     :param oa_api: a previously initiated Oanda API object
     :param oa_cfg: an object containing Oanda configuration attributes
     :param tick_queue: this function writes each quote to this queue
-    :param log_queue: a general log queue
+    :param log_queue: the master log queue
     :param feed_pipe_c: an IPC pipe to talk to the main process
     :return: None
 
@@ -168,9 +192,6 @@ def candlestick_maker(inst, tick_queue, event_queue, log_queue, candle_pipe_c):
 
                 event_queue.put(m1_candle)
 
-                # print(tick_df)
-                # print(m1_candle.__dict__)
-
                 tick_df = pd.DataFrame(columns=['tick_date',
                                                 'bid',
                                                 'ask'
@@ -239,19 +260,19 @@ def log_handler(log_queue, log_pipe_c):
 
 def cleanup(parent_pipes, all_procs, log_queue):
 
-    print('starting cleanup')
     log_queue.put(['INFO', 'main', 'Sending the KILL signal to child processes...'])
     for p_pipe in parent_pipes:
-        print(p_pipe)
         p_pipe.send('KILL')
     for proc in all_procs:
-        print('joining')
         proc.join()
 
     sys.exit(0)
 
 
-def main():
+def main(stdscr):
+
+    stdscr.nodelay(True)
+    stdscr.clear()
 
     # Retrieving data for each forex instrument
     fx_info = trade_config.init_fx_info('fx_inst.json')
@@ -271,7 +292,6 @@ def main():
     log_pipe_p, log_pipe_c = multiprocessing.Pipe(duplex=True)
     candle_pipe_p, candle_pipe_c = multiprocessing.Pipe(duplex=True)
     feed_pipe_p, feed_pipe_c = multiprocessing.Pipe(duplex=True)
-
 
     log_proc = multiprocessing.Process(target=log_handler, args=(log_queue, log_pipe_c))
 
@@ -294,7 +314,8 @@ def main():
 
     else:
         feed_proc = multiprocessing.Process(target=hist_feed,
-                                            args=('EUR_USD',  'data/EUR_USD_2017_M1.csv', log_queue, feed_pipe_c))
+                                            args=('EUR_USD',  'data/EUR_USD_2017_M1.csv',
+                                                  log_queue, feed_pipe_c, event_queue))
 
         all_procs = [feed_proc, log_proc]
         parent_pipes = [log_pipe_p, feed_pipe_p]
@@ -306,6 +327,10 @@ def main():
     # TODO Need a graceful exit code from child processes in addition to FATAL
 
     while True:
+
+        key = stdscr.getch()
+        if key == ord('q'):
+            cleanup(parent_pipes, all_procs, log_queue)
 
         try:
             # Checking all child proc pipes for incoming messages
@@ -319,14 +344,17 @@ def main():
                         sys.exit(0)
 
         except SystemExit:
-            print('caught system exit')
             cleanup(parent_pipes, all_procs, log_queue)
 
         except KeyboardInterrupt:
             cleanup(parent_pipes, all_procs, log_queue)
             sys.exit(0)
 
+        while not event_queue.empty():
+            event = event_queue.get()
+            stdscr.addstr(str(event) + '\n')
+
 
 if __name__ == "__main__":
-    main()
+    wrapper(main)
 
