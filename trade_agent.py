@@ -21,7 +21,7 @@ class HistFeed(Process):
 
     def run(self):
 
-        self.log_queue.put(['INFO', 'hist_feed', 'Loading history file %s data for %s ' % (self.hist_file, self.inst)])
+        self.log_queue.put(['INFO', self.name, 'Loading history file %s data for %s ' % (self.hist_file, self.inst)])
         hist_df = pd.read_csv(self.hist_file)
 
         test = 0
@@ -70,24 +70,24 @@ class LiveFeed(Process):
 
         # TODO capture timeout error
 
-        self.log_queue.put(['INFO', 'live_feed', 'Starting live feed...'])
+        self.log_queue.put(['INFO', self.name, 'Starting live feed...'])
 
         try:
 
-            response = self.oa_api.pricing.stream(oa_cfg.active_account,
+            response = self.oa_api.pricing.stream(self.oa_cfg.active_account,
                                                   snapshot=False,
-                                                  instruments=inst)
+                                                  instruments=self.inst)
 
         # TODO why is this not in scope?
         except V20ConnectionError:
 
-            self.log_queue.put(['ERROR', 'live_feed', 'connection error'])
+            self.log_queue.put(['ERROR', self.name, 'connection error'])
             self.feed_pipe_c.send('FATAL')
             return
 
         # if the stream call gets back anything but 200 throw an error and exit
         if response.status != 200:
-            self.log_queue.put(['ERROR', 'live_feed', 'Oanda API call returned - ' + str(response.status)])
+            self.log_queue.put(['ERROR', self.name, 'Oanda API call returned - ' + str(response.status)])
             self.feed_pipe_c.send('FATAL')
             return
 
@@ -119,7 +119,7 @@ class CandleMaker(Process):
         # TODO add a parameter to control the timeframe of the candle
         # TODO the inst parameter shouldn't be needed, that data should be part of the tick msg
 
-        self.log_queue.put(['INFO', 'candlestick_maker', 'Starting candle maker ...'])
+        self.log_queue.put(['INFO', self.name, 'Starting candle maker ...'])
 
         tick_df = pd.DataFrame(columns=['tick_date',
                                         'bid',
@@ -167,7 +167,7 @@ class CandleMaker(Process):
                     ask_cl = tick_df.iloc[-1]['ask']
 
                     m1_candle = trade_candle.Candle(tick_df.iloc[-1]['tick_date'],
-                                                    inst,
+                                                    self.inst,
                                                     'M1',
                                                     bid_op,
                                                     bid_hi,
@@ -186,7 +186,7 @@ class CandleMaker(Process):
                                                     'ask'
                                                     ])
 
-                    self.log_queue.put(['INFO', 'candlestick_maker', 'M1 candle generated for: ' + str(tick_date)])
+                    self.log_queue.put(['INFO', self.name, 'M1 candle generated for: ' + str(tick_date)])
 
                 tick_df.loc[tick_df_idx] = [tick_date, bid, ask]
                 tick_df_idx += 1
@@ -227,7 +227,7 @@ class LogHandler(Process):
 
     def run(self):
 
-        self.logger.info('INFO: log_handler: Log Initialization')
+        self.logger.info('INFO: %s: Logging Initialized...' % self.name)
 
         while True:
 
@@ -276,7 +276,7 @@ class EventHandler(Process):
 
         self.log_proc.start()
 
-        self.log_queue.put(['INFO', 'event_handler', 'Logging Initialized...'])
+        self.log_queue.put(['INFO', self.name, 'Logging Initialized...'])
 
         if self.go_live:
 
@@ -286,45 +286,43 @@ class EventHandler(Process):
             self.candle_proc = CandleMaker('EUR_USD', self.tick_queue, self.event_queue,
                                            self.log_queue, self.candle_pipe_c, daemon=True)
 
-            self.all_procs = [self.candle_proc, self.feed_proc, self.log_proc]
+            self.all_procs = [self.candle_proc, self.feed_proc]
             self.parent_pipes = [self.log_pipe_p, self.candle_pipe_p, self.feed_pipe_p]
 
         else:
             self.feed_proc = HistFeed('EUR_USD', 'data/EUR_USD_2017_M1.csv', self.log_queue,
                                       self.event_queue, self.feed_pipe_c, daemon=True)
 
-            self.all_procs = [self.feed_proc, self.log_proc]
+            self.all_procs = [self.feed_proc]
             self.parent_pipes = [self.log_pipe_p, self.feed_pipe_p]
+
+        for proc in self.all_procs:
+            proc.start()
+
+        self.all_procs.append(self.log_proc)
+
 
         # TODO use "import daemon" to manage all of this
         # TODO Need a graceful exit code from child processes in addition to FATAL
 
         while not self.exit.is_set():
 
-            # try:
-            #     # Checking all child proc pipes for incoming messages
-            #     for pipe in self.parent_pipes:
-            #         if pipe.poll():
-            #             msg = pipe.recv()
-            #
-            #             # If any child proc sends a FATAL message, kill all the others and exit
-            #             if msg == 'FATAL':
-            #                 self.log_queue.put(['ERROR', 'main', 'FATAL received! Exiting...'])
-            #                 sys.exit(0)
-            #
-            # except SystemExit:
-            #     cleanup(parent_pipes, all_procs, log_queue)
-            #
-            # except KeyboardInterrupt:
-            #     cleanup(parent_pipes, all_procs, log_queue)
-            #     sys.exit(0)
-
             while not self.event_queue.empty():
                 self.event = self.event_queue.get()
 
+            for pipe in self.parent_pipes:
+                if pipe.poll():
+                    msg = pipe.recv()
+
+                    # If any child proc sends a FATAL message, kill all the others and exit
+                    if msg == 'FATAL':
+                        self.log_queue.put(['ERROR', self.name, 'FATAL received!'])
+                        self.cleanup()
+                        self.exit.set()
+
     def cleanup(self):
 
-        self.log_queue.put(['INFO', 'main', 'Sending the KILL signal to child processes...'])
+        self.log_queue.put(['INFO', self.name, 'Sending the KILL signal to child processes...'])
 
         for p_pipe in self.parent_pipes:
             p_pipe.send('KILL')
@@ -336,9 +334,9 @@ def main():
 
     # Retrieving data for each forex instrument
     fx_info = trade_config.init_fx_info('fx_inst.json')
-    oa_cfg = trade_config.OAConf('/home/aklaum/v20.conf')
 
     # Setting up the Oanda API
+    oa_cfg = trade_config.OAConf('/home/aklaum/v20.conf')
     oa_api = trade_config.init_oa_api(oa_cfg)
 
     event_proc = EventHandler(fx_info, oa_cfg, oa_api, False)
