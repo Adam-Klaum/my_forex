@@ -3,3 +3,4 @@
 .idea
 data/
 *.log*
+.pytest_cache

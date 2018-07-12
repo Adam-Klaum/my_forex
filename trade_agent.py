@@ -1,23 +1,24 @@
 import logging
 import logging.handlers
-import trade_config
+import config
 import pandas as pd
-import trade_candle
+import candle
 import sys
 import time
-from multiprocessing import Queue, Pipe, Process, Event
+from multiprocessing import Queue, Pipe, Process
 from datetime import datetime
+import v20
 
 
 class HistFeed(Process):
 
-    def __init__(self, inst, hist_file, log_queue, event_queue, feed_pipe_c, **kwargs):
+    def __init__(self, inst, hist_file, log_queue, event_queue, comm_queue, **kwargs):
         super(HistFeed, self).__init__()
         self.inst = inst
         self.hist_file = hist_file
         self.log_queue = log_queue
         self.event_queue = event_queue
-        self.feed_pipe_c = feed_pipe_c
+        self.comm_queue = comm_queue
 
     def run(self):
 
@@ -41,66 +42,70 @@ class HistFeed(Process):
                                          row.ask_close
                                          )
 
-            self.event_queue.put({'msg_type': 'CANDLE', 'msg' : candle})
+            self.event_queue.put({'msg_type': 'CANDLE', 'msg': candle})
 
             if test == 10:
-                self.feed_pipe_c.send('FATAL')
-                return
-
-            if self.feed_pipe_c.poll():
-                msg = self.feed_pipe_c.recv()
-                if msg == 'KILL':
-                    return
+                self.log_queue.put(['INFO', self.name, 'History processing complete'])
+                self.comm_queue.put(['FATAL', self.name])
+                break
+                # return
+            # if self.feed_pipe_c.poll():
+            #     msg = self.feed_pipe_c.recv()
+            #     if msg == 'KILL':
+            #         return
 
             test += 1
+
+        return
 
 
 class LiveFeed(Process):
 
-    def __init__(self, inst, oa_api, oa_cfg, tick_queue, log_queue, feed_pipe_c, **kwargs):
+    def __init__(self, inst, oa_api, oa_cfg, tick_queue, log_queue, **kwargs):
         super(LiveFeed, self).__init__()
         self.inst = inst
         self.oa_api = oa_api
         self.oa_cfg = oa_cfg
         self.tick_queue = tick_queue
         self.log_queue = log_queue
-        self.feed_pipe_c = feed_pipe_c
 
     def run(self):
-
-        # TODO capture timeout error
 
         self.log_queue.put(['INFO', self.name, 'Starting live feed...'])
 
         try:
-
             response = self.oa_api.pricing.stream(self.oa_cfg.active_account,
                                                   snapshot=False,
                                                   instruments=self.inst)
 
-        # TODO why is this not in scope?
-        except V20ConnectionError:
+        except v20.errors.V20ConnectionError:
 
-            self.log_queue.put(['ERROR', self.name, 'connection error'])
-            self.feed_pipe_c.send('FATAL')
+            self.log_queue.put(['ERROR', self.name, 'API connection error'])
+            # self.feed_pipe_c.send('FATAL')
+            return
+
+        except v20.errors.V20Timeout:
+            self.log_queue.put(['ERROR', self.name, 'API timeout error'])
+            # self.feed_pipe_c.send('FATAL')
             return
 
         # if the stream call gets back anything but 200 throw an error and exit
         if response.status != 200:
             self.log_queue.put(['ERROR', self.name, 'Oanda API call returned - ' + str(response.status)])
-            self.feed_pipe_c.send('FATAL')
+            # self.feed_pipe_c.send('FATAL')
             return
 
         # main loop for retrieving tick data
         for msg_type, msg in response.parts():
 
             # if a KILL message is received from the main process then exit
-            if self.feed_pipe_c.poll():
-                msg = self.feed_pipe_c.recv()
-                if msg == 'KILL':
-                    return
+            # if self.feed_pipe_c.poll():
+            #     msg = self.feed_pipe_c.recv()
+            #     if msg == 'KILL':
+            #         return
 
             if msg_type == "pricing.Price":
+                print(msg)
                 self.tick_queue.put(msg)
 
 
@@ -195,10 +200,10 @@ class CandleMaker(Process):
 
 class LogHandler(Process):
 
-    def __init__(self, log_queue, log_pipe_c, **kwargs):
+    def __init__(self, log_queue, **kwargs):
         super(LogHandler, self).__init__()
         self.log_queue = log_queue
-        self.log_pipe_c = log_pipe_c
+        # self.log_pipe_c = log_pipe_c
         self.log_levels = {'CRITICAL': 50,
                            'ERROR': 40,
                            'WARNING': 30,
@@ -237,16 +242,16 @@ class LogHandler(Process):
                 log_final_msg = ': '.join(log_msg)
                 self.logger.log(self.log_levels[log_level], log_final_msg)
 
-            if self.log_pipe_c.poll():
-                msg = self.log_pipe_c.recv()
-                if msg == 'KILL':
-                    return
+            # if self.log_pipe_c.poll():
+            #     msg = self.log_pipe_c.recv()
+            #     if msg == 'KILL':
+            #         return
 
 
-class EventHandler(Process):
+class MainProc(Process):
 
     def __init__(self, fx_info, oa_cfg, oa_api, go_live, **kwargs):
-        super(EventHandler, self).__init__()
+        super(MainProc, self).__init__()
         self.fx_info = fx_info
         self.oa_cfg = oa_cfg
         self.oa_api = oa_api
@@ -254,71 +259,86 @@ class EventHandler(Process):
 
         self.log_queue = Queue()
         self.tick_queue = Queue()
-        self.event_queue = Queue()
+        # self.event_queue = Queue()
+        # self.comm_queue = Queue()
 
-        self.log_pipe_p, self.log_pipe_c = Pipe(duplex=True)
-        self.candle_pipe_p, self.candle_pipe_c = Pipe(duplex=True)
-        self.feed_pipe_p, self.feed_pipe_c = Pipe(duplex=True)
+        # self.log_pipe_p, self.log_pipe_c = Pipe(duplex=True)
+        # self.candle_pipe_p, self.candle_pipe_c = Pipe(duplex=True)
+        # self.feed_pipe_p, self.feed_pipe_c = Pipe(duplex=True)
 
         self.candle_proc = None
         self.feed_proc = None
         self.log_proc = None
 
         self.all_procs = []
-        self.parent_pipes = []
+        # self.parent_pipes = []
 
-        self.exit = Event()
-        self.event = None
+        # self.event = None
 
     def run(self):
 
-        self.log_proc = LogHandler(self.log_queue, self.log_pipe_c)
+        self.log_proc = LogHandler(self.log_queue)
 
         self.log_proc.start()
 
-        self.log_queue.put(['INFO', self.name, 'Logging Initialized...'])
+        self.log_queue.put(['INFO', self.name, 'Starting main process'])
 
         if self.go_live:
 
             self.feed_proc = LiveFeed('EUR_USD', self.oa_api, self.oa_cfg,
-                                      self.tick_queue, self.log_queue, self.feed_pipe_c, daemon=True)
+                                      self.tick_queue, self.log_queue)
 
-            self.candle_proc = CandleMaker('EUR_USD', self.tick_queue, self.event_queue,
-                                           self.log_queue, self.candle_pipe_c, daemon=True)
+            # self.candle_proc = CandleMaker('EUR_USD', self.tick_queue,
+            #                                self.log_queue)
 
             self.all_procs = [self.candle_proc, self.feed_proc]
-            self.parent_pipes = [self.log_pipe_p, self.candle_pipe_p, self.feed_pipe_p]
 
         else:
             self.feed_proc = HistFeed('EUR_USD', 'data/EUR_USD_2017_M1.csv', self.log_queue,
-                                      self.event_queue, self.feed_pipe_c, daemon=True)
+                                      self.event_queue, self.comm_queue)
 
             self.all_procs = [self.feed_proc]
-            self.parent_pipes = [self.log_pipe_p, self.feed_pipe_p]
+            # self.parent_pipes = [self.log_pipe_p, self.feed_pipe_p]
 
         for proc in self.all_procs:
             proc.start()
 
         self.all_procs.append(self.log_proc)
 
-
         # TODO use "import daemon" to manage all of this
         # TODO Need a graceful exit code from child processes in addition to FATAL
 
-        while not self.exit.is_set():
+        # while True:
+        #
+        #     try:
+        #         msg = self.comm_queue.get_nowait()
+        #
+        #     except Queue.Empty:
+        #         print('queue empty')
+        #         pass
+        #
+        #     finally:
+        #         if msg[0] == 'FATAL':
+        #             self.log_queue.put(['ERROR', self.name, 'FATAL received from process %s!' % msg[1]])
+        #             # self.cleanup()
+        #             return
+        #
+        #
+        #     # for pipe in self.parent_pipes:
+        #     #     if pipe.poll():
+        #     #         msg = pipe.recv()
+        #     #
+        #     #         # If any child proc sends a FATAL message, kill all the others and exit
+        #     #         if msg == 'FATAL':
+        #     #             self.log_queue.put(['ERROR', self.name, 'FATAL received!'])
+        #     #             self.cleanup()
+        #     #             return
+        #
+        #     while not self.event_queue.empty():
+        #         self.event = self.event_queue.get()
 
-            while not self.event_queue.empty():
-                self.event = self.event_queue.get()
-
-            for pipe in self.parent_pipes:
-                if pipe.poll():
-                    msg = pipe.recv()
-
-                    # If any child proc sends a FATAL message, kill all the others and exit
-                    if msg == 'FATAL':
-                        self.log_queue.put(['ERROR', self.name, 'FATAL received!'])
-                        self.cleanup()
-                        self.exit.set()
+        for proc in self.all_procs:
+            proc.join()
 
     def cleanup(self):
 
@@ -326,8 +346,11 @@ class EventHandler(Process):
 
         for p_pipe in self.parent_pipes:
             p_pipe.send('KILL')
+
         for proc in self.all_procs:
             proc.join()
+
+        return
 
 
 def main():
@@ -339,11 +362,10 @@ def main():
     oa_cfg = trade_config.OAConf('/home/aklaum/v20.conf')
     oa_api = trade_config.init_oa_api(oa_cfg)
 
-    event_proc = EventHandler(fx_info, oa_cfg, oa_api, False)
+    main_proc = MainProc(fx_info, oa_cfg, oa_api, True)
+    main_proc.start()
 
-    event_proc.start()
-
-    event_proc.join()
+    main_proc.join()
     sys.exit(0)
 
 
