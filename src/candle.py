@@ -1,9 +1,16 @@
-import datetime
+from datetime import datetime
 from typing import Tuple
-from decimal import getcontext, Decimal, DecimalException
+from decimal import Decimal, DecimalException
+from multiprocessing import Process
+
+
+class ProcessKilled(Exception):
+    pass
 
 
 class Candle(object):
+
+    #TODO parameterize the spread multiplier
 
     def __init__(self,
                  dt: datetime,
@@ -27,3 +34,22 @@ class Candle(object):
         self.spread = Decimal(abs(self.ask_c - self.bid_c) * 10000)
 
 
+class CandleMaker(Process):
+
+    def __init__(self, tick_queue):
+        super(CandleMaker, self).__init__()
+        self.tick_queue = tick_queue
+
+    def run(self):
+
+        while True:
+
+            while not self.tick_queue.empty():
+                msg = self.tick_queue.get()
+
+                if msg == 'KILL':
+                    print('got a kill')
+                    raise ProcessKilled
+
+                date_part, minute, _ = msg.time.split(':')
+                minute = int(minute)
