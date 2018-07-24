@@ -12,3 +12,7 @@ candle_proc.start()
 tick_queue.put('KILL')
 
 candle_proc.join()
+
+
+
+

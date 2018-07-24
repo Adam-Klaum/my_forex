@@ -1,5 +1,5 @@
 from pytest import *
-from tradeagent.candle.candle import Candle, CandleMaker, ProcessKilled
+from tradeagent.candle import Candle, CandleMaker, ProcessKilled
 from datetime import datetime
 from decimal import Decimal, DecimalException
 from multiprocessing import Queue, Pipe, Process
@@ -55,5 +55,5 @@ def test_candle_maker_kill():
     tick_queue.put('KILL')
     candle_proc.join()
 
-    assert candle_proc.exitcode
+    assert not candle_proc.exitcode
 

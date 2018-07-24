@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import Tuple
 from decimal import Decimal, DecimalException
 from multiprocessing import Process
+from tradeagent.config import TAConfig
 
 
 class ProcessKilled(Exception):
@@ -9,8 +10,6 @@ class ProcessKilled(Exception):
 
 
 class Candle(object):
-
-    #TODO parameterize the spread multiplier
 
     def __init__(self,
                  dt: datetime,
@@ -31,7 +30,7 @@ class Candle(object):
         except (ValueError, DecimalException):
             raise
 
-        self.spread = Decimal(abs(self.ask_c - self.bid_c) * 10000)
+        self.spread = Decimal(abs(self.ask_c - self.bid_c) * FXConfig.inst_mult[self.inst])
 
 
 class CandleMaker(Process):
@@ -48,8 +47,7 @@ class CandleMaker(Process):
                 msg = self.tick_queue.get()
 
                 if msg == 'KILL':
-                    print('got a kill')
-                    raise ProcessKilled
+                    return
 
                 date_part, minute, _ = msg.time.split(':')
                 minute = int(minute)
