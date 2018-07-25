@@ -1,27 +1,24 @@
 from yaml import safe_load
 from os import curdir
 from os.path import expanduser, join, isfile, abspath
+from dotmap import DotMap
 
+config = None
 
-class TAConfig(object):
+file_found = 0
+paths = [curdir, expanduser('~'), '/etc/tradeagent']
+config_file = 'tradeagent.conf'
 
-    #TODO better system for existence of file?
+for path in paths:
+    path = abspath(join(path, config_file))
+    if isfile(path):
+        print("Loading config from: {}".format(path))
+        file_found = 1
+        break
 
-    my_config = None
+if file_found:
+    with open(path) as f:
+        config = DotMap(safe_load(f))
 
-    file_found = 0
-    paths = [curdir, expanduser('~'), '/etc/tradeagent']
-
-    for path in paths:
-        path = abspath(join(path, 'tradeagent.conf'))
-        if isfile(path):
-            print("Loading config from: {}".format(path))
-            file_found = 1
-            break
-
-    if file_found:
-        with open(path) as f:
-            my_config = safe_load(f)
-
-
-print(TAConfig.__dict__)
+else:
+    raise FileExistsError('{} not found'.format(config_file))

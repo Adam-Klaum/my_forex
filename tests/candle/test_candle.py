@@ -1,5 +1,5 @@
 from pytest import *
-from tradeagent.candle import Candle, CandleMaker, ProcessKilled
+from tradeagent.candle import Candle, CandleMaker
 from datetime import datetime
 from decimal import Decimal, DecimalException
 from multiprocessing import Queue, Pipe, Process

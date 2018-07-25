@@ -1,16 +1,6 @@
-name: forex 
+name: tradeagent 
 dependencies:
 - python=3
-- numpy
 - pandas
-- seaborn
-- matplotlib
-- jupyter
-- scikit-learn
 - PyYAML
-- tabulate
-- ujson
 - v20
-- bokeh
-- backtrader
-

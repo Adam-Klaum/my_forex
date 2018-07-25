@@ -1,1 +1,1 @@
-from .config import TAConfig
+from .config import config

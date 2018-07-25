@@ -1,1 +1,1 @@
-from .candle import Candle, CandleMaker, ProcessKilled
+from .candle import Candle, CandleMaker

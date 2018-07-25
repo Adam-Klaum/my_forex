@@ -2,11 +2,7 @@ from datetime import datetime
 from typing import Tuple
 from decimal import Decimal, DecimalException
 from multiprocessing import Process
-from tradeagent.config import TAConfig
-
-
-class ProcessKilled(Exception):
-    pass
+from tradeagent.config import config
 
 
 class Candle(object):
@@ -30,7 +26,7 @@ class Candle(object):
         except (ValueError, DecimalException):
             raise
 
-        self.spread = Decimal(abs(self.ask_c - self.bid_c) * FXConfig.inst_mult[self.inst])
+        self.spread = Decimal(abs(self.ask_c - self.bid_c) * config.fx_info[self.inst].multiplier)
 
 
 class CandleMaker(Process):
