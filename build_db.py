@@ -1,4 +1,4 @@
-from db_utils import db_connect
+from tradeagent.utils import db_connect
 
 con = db_connect()
 cur = con.cursor()

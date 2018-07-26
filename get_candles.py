@@ -2,7 +2,7 @@ from tradeagent.config import config
 import sys
 import v20
 from datetime import datetime, timedelta
-from db_utils import db_connect
+from tradeagent.utils import db_connect
 
 
 def main():
@@ -19,8 +19,8 @@ def main():
 
     candle_sql = '''
         INSERT OR IGNORE INTO raw_candle 
-        (time, type, instrument, open, high, low, close) 
-        VALUES (?, ?, ?, ?, ?, ?, ?);
+        (time, type, instrument, bid_open, bid_high, bid_low, bid_close, ask_open, ask_high, ask_low, ask_close) 
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
         '''
 
     while start_date < end_date:
@@ -35,11 +35,8 @@ def main():
         candles = response.get('candles')
 
         for candle in candles:
-            cur.execute(candle_sql, (candle.time, 'bid', 'EUR_USD',
-                                     candle.bid.o, candle.bid.h, candle.bid.l,
-                                     candle.bid.c))
-
-            cur.execute(candle_sql, (candle.time, 'ask', 'EUR_USD',
+            cur.execute(candle_sql, (candle.time, 'EUR_USD',
+                                     candle.bid.o, candle.bid.h, candle.bid.l, candle.bid.c,
                                      candle.ask.o, candle.ask.h, candle.ask.l,
                                      candle.ask.c))
 

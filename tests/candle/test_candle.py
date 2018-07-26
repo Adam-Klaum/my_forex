@@ -2,7 +2,7 @@ from pytest import *
 from tradeagent.candle import Candle, CandleMaker
 from datetime import datetime
 from decimal import Decimal, DecimalException
-from multiprocessing import Queue, Pipe, Process
+from multiprocessing import Queue
 
 
 def test_candle_creation():
