@@ -1,9 +1,8 @@
-from pytest import *
+from pytest import raises
 from tradeagent.backtest import History
 from tradeagent.config import root
 from pandas.io.sql import DatabaseError
-from tradeagent.indicators import Spread
-from decimal import Decimal, getcontext
+from tradeagent.indicators import DM
 
 
 def test_history_load():
@@ -26,7 +25,7 @@ def test_history_load():
         hist3.retrieve_data()
 
 
-def test_spread_indicator():
+def test_spread():
 
     db_file = root / 'tests' / 'backtest' / 'test.sqlite3'
 
@@ -34,18 +33,20 @@ def test_spread_indicator():
     hist.query = 'SELECT * FROM raw_candle;'
     hist.retrieve_data()
 
-    spread = Spread(hist.df)
-    spread.apply()
+    assert hist.df.spread.sum() == 2886
 
-    assert sum([Decimal(spread) for spread in hist.df['spread']]) == Decimal('288.6')
 
-    hist2 = History(db_file)
-    hist2.query = 'SELECT * FROM raw_candle;'
-    hist2.retrieve_data()
+def test_dm_indicator():
 
-    hist2.df.drop('bid_close', inplace=True, axis=1)
+    db_file = root / 'tests' / 'backtest' / 'test.sqlite3'
 
-    spread2 = Spread(hist2.df)
+    hist = History(db_file)
+    hist.query = 'SELECT * FROM raw_candle;'
+    hist.retrieve_data()
+    dm = DM(hist.df)
+    dm.apply()
 
-    with raises(KeyError):
-        spread2.apply()
+
+
+
+

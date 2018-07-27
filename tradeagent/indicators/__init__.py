@@ -1,1 +1,1 @@
-from .indicators import Spread
+from .indicators import DM

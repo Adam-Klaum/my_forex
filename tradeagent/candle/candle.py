@@ -11,8 +11,8 @@ class Candle(object):
                  dt: datetime,
                  inst: str,
                  time_frame: str,
-                 bid: Tuple[float, float, float, float],
-                 ask: Tuple[float, float, float, float]
+                 bid: Tuple[str, str, str, str],
+                 ask: Tuple[str, str, str, str]
                  ):
 
         self.dt = dt
@@ -20,13 +20,13 @@ class Candle(object):
         self.time_frame = time_frame
 
         try:
-            self.bid_o, self.bid_h, self.bid_l, self.bid_c = [Decimal(str(i)) for i in bid]
-            self.ask_o, self.ask_h, self.ask_l, self.ask_c = [Decimal(str(i)) for i in ask]
+            self.bid_o, self.bid_h, self.bid_l, self.bid_c = [int(Decimal(i) * config.fx_info[inst].multiplier) for i in bid]
+            self.ask_o, self.ask_h, self.ask_l, self.ask_c = [int(Decimal(i) * config.fx_info[inst].multiplier) for i in ask]
 
         except (ValueError, DecimalException):
             raise
 
-        self.spread = Decimal(abs(self.ask_c - self.bid_c) * config.fx_info[self.inst].multiplier)
+        self.spread = abs(self.ask_c - self.bid_c)
 
 
 class CandleMaker(Process):
