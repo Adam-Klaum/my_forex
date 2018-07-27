@@ -1,6 +1,6 @@
 from tradeagent.config import config
 from decimal import Decimal
-from numpy import subtract, roll, vectorize, array
+from numpy import subtract, roll, clip, ma
 
 
 class DM(object):
@@ -39,68 +39,64 @@ class DM(object):
         # if both are positive then the lesser one is zero
 
 
-        spread = abs(Decimal(ask_close) - Decimal(bid_close))
-        spread *= Decimal(config.fx_info[instrument].multiplier)
-
-        return str(spread.quantize(Decimal('.1')))
+        # spread = abs(Decimal(ask_close) - Decimal(bid_close))
+        # spread *= Decimal(config.fx_info[instrument].multiplier)
+        #
+        # return str(spread.quantize(Decimal('.1')))
 
     def roll_column(self, column):
 
-        column = self.df[column].values.astype(float)
+        column = self.df[column].values
         column_prev = roll(column, 1)
         column_prev[0] = 0
+        column[0] = 0
         return column, column_prev
 
-    def dm_calc(self, dm_plus, dm_minus):
+    def dm_calc(self, high_diff, low_diff):
 
-        if dm_plus <= 0:
-            if dm_minus <= 0:
-                return array(0, 0)
-            else:
-                return array(0, dm_minus)
+        dm_plus = []
+        dm_minus = []
 
-        elif dm_minus <= 0:
-            if dm_plus <= 0:
-                return array(0, 0)
-            else:
-                return array(dm_plus, 0)
+        for high, low in zip(high_diff, low_diff):
+
+            if high <= 0:
+                if low <= 0:
+                    dm_plus.append(0)
+                    dm_minus.append(0)
+                else:
+                    dm_plus.append(0)
+                    dm_minus.append(low)
+
+            elif low <= 0:
+                if high <= 0:
+                    dm_plus.append(0)
+                    dm_minus.append(0)
+                else:
+                    dm_plus.append(high)
+                    dm_minus.append(0)
+
+        return dm_plus, dm_minus
 
     def apply(self):
         """Applies the indicator to each row of the Data Frame"""
 
-        dm_calc_vec = vectorize(self.dm_calc)
+        bid_high, bid_high_prev = self.roll_column('bid_high')
+        bid_low, bid_low_prev = self.roll_column('bid_low')
+        ask_high, ask_high_prev = self.roll_column('ask_high')
+        ask_low, ask_low_prev = self.roll_column('ask_low')
 
+        bid_high_diff = subtract(bid_high, bid_high_prev).clip(0)
+        bid_low_diff = subtract(bid_low, bid_low_prev).clip(0)
+        ask_high_diff = subtract(ask_low, ask_low_prev).clip(0)
+        ask_low_diff = subtract(ask_high, ask_high_prev).clip(0)
 
-        # bid_high, bid_high_prev = self.roll_column('bid_high')
-        # bid_low, bid_low_prev = self.roll_column('bid_low')
-        # ask_high, ask_high_prev = self.roll_column('ask_high')
-        # ask_low, ask_low_prev = self.roll_column('ask_low')
-        #
-        # bid_high_diff = subtract(bid_high, bid_high_prev)
-        # bid_low_diff = subtract(bid_low, bid_low_prev)
-        # ask_high_diff = subtract(ask_low, ask_low_prev)
-        # ask_low_diff = subtract(ask_high, ask_high_prev)
-        #
-        # dm_result = dm_calc_vec(bid_high_diff, bid_low_diff)
-        #
-        # print(dm_result.shape)
-        #
-        # print(dm_result)
-        #
-        # # self.df['bid_high_diff'] = self.df.bid_high - self.df.bid_high_prev
-        # self.df['bid_low_diff'] = self.df.bid_low - self.df.bid_low_prev
-        # self.df['ask_high_diff'] = self.df.ask_high - self.df.ask_high_prev
-        # self.df['ask_low_diff'] = self.df.ask_low - self.df.ask_low_prev
+        bid_high_diff = ma.array(bid_high_diff, mask=bid_high_diff > bid_low_diff)
+        bid_low_diff = ma.array(bid_low_diff, mask=bid_low_diff > bid_high_diff)
+        ask_high_diff = ma.array(ask_high_diff, mask=ask_high_diff > ask_low_diff)
+        ask_low_diff = ma.array(ask_low_diff, mask=ask_low_diff > ask_high_diff)
 
-        # self.df['bid +DI'] = self.df.apply(lambda row: self.row_calc(row['bid_high'],
-        #                                                          row['bid_high_prev']), axis=1)
-        #
-        # self.df['bid -DI'] = self.df.apply(lambda row: self.row_calc(row['bid_low'],
-        #                                                          row['bid_low_prev']), axis=1)
-        #
-        # self.df['ask +DI'] = self.df.apply(lambda row: self.row_calc(row['ask_high'],
-        #                                                          row['ask_high_prev']), axis=1)
-        #
-        # self.df['ask -DI'] = self.df.apply(lambda row: self.row_calc(row['ask_low'],
-        #                                                          row['ask_low_prev']), axis=1)
+        self.df['bid +DM'] = bid_high_diff.filled(bid_high_diff)
+        self.df['bid -DM'] = bid_low_diff.filled(bid_low_diff)
+        self.df['ask +DM'] = ask_high_diff.filled(ask_high_diff)
+        self.df['ask -DM'] = ask_low_diff.filled(ask_low_diff)
 

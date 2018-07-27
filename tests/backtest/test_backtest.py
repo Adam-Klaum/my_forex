@@ -46,6 +46,12 @@ def test_dm_indicator():
     dm = DM(hist.df)
     dm.apply()
 
+    print(hist.df.head())
+
+    hist.df.to_csv('dm_test.csv')
+
+
+
 
 
 
