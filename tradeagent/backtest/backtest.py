@@ -6,48 +6,30 @@ from tradeagent.config import config
 from decimal import Decimal
 
 
-def price_convert(instrument, price):
+def convert_price(instrument, price):
+
     return int(Decimal(price) * config.fx_info[instrument].multiplier)
 
 
-class History(object):
-    """Class to retrieve and store historical price data
-    """
+def get_data(db_file, query):
 
-    def __init__(self, db_file):
-        """
-        :param db_file: Full path to the location of the sqlite file
-        """
-
-        self.db_file = db_file
-        if not Path(self.db_file).is_file():
+    if not Path(db_file).is_file():
             raise FileNotFoundError
 
-        self.query = None
-        self.df = None
+    try:
+        df = read_sql_query(query, db_connect(db_file))
+    except DatabaseError as e:
+        raise
 
-    def retrieve_data(self):
-        """
-        Queries the sqlite database using the instance query property
-        Sets the instance DataFrame to the results
+    # Converting all price columns to integers based on their instrument multiplier
 
-        :return: True if successful, false otherwise
-        """
+    price_columns = ['bid_open', 'bid_high', 'bid_low', 'bid_close', 'ask_open', 'ask_high', 'ask_low', 'ask_close']
 
-        try:
-            self.df = read_sql_query(self.query, db_connect(self.db_file))
-        except DatabaseError:
-            raise
+    for column in price_columns:
+        df[column] = df.apply(lambda row: convert_price(row['instrument'], row[column]), axis=1)
 
-        # Converting all price columns to integers based on their instrument multiplier
+    # Adding the spread column for each row
 
-        price_columns = ['bid_open', 'bid_high', 'bid_low', 'bid_close', 'ask_open', 'ask_high', 'ask_low', 'ask_close']
+    df['spread'] = abs(df.ask_close - df.bid_close)
 
-        for column in price_columns:
-            self.df[column] = self.df.apply(lambda row: price_convert(row['instrument'], row[column]), axis=1)
-
-        # Adding the spread column for each row
-
-        self.df['spread'] = abs(self.df.ask_close - self.df.bid_close)
-
-        return True
+    return df

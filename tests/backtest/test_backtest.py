@@ -1,27 +1,23 @@
 from pytest import raises
-from tradeagent.backtest import History
+from tradeagent.backtest import get_data
 from tradeagent.config import root
 from pandas.io.sql import DatabaseError
-from tradeagent.indicators import DM
+from tradeagent.indicators import apply_dm
 
 
 def test_history_load():
 
     db_file = root / 'tests' / 'backtest' / 'test.sqlite3'
 
-    hist = History(db_file)
-    hist.query = 'SELECT * FROM raw_candle;'
-    hist.retrieve_data()
+    hist = get_data(db_file, 'SELECT * FROM raw_candle;')
 
-    assert hist.df.shape[0] == 100
+    assert hist.shape[0] == 100
 
     with raises(FileNotFoundError):
-        hist2 = History('not a file')
-        hist2.query = 'SELECT * FROM raw_candle;'
-        hist2.retrieve_data()
+        hist2 = get_data('not a file', 'SELECT * FROM raw_candle;')
 
     with raises(DatabaseError):
-        hist3 = History(db_file)
+        hist3 = get_data(db_file, 'Rumplestiltskin')
         hist3.retrieve_data()
 
 
@@ -29,30 +25,15 @@ def test_spread():
 
     db_file = root / 'tests' / 'backtest' / 'test.sqlite3'
 
-    hist = History(db_file)
-    hist.query = 'SELECT * FROM raw_candle;'
-    hist.retrieve_data()
+    hist = get_data(db_file, 'SELECT * FROM raw_candle;')
 
-    assert hist.df.spread.sum() == 2886
+    assert hist.spread.sum() == 2886
 
 
 def test_dm_indicator():
 
     db_file = root / 'tests' / 'backtest' / 'test.sqlite3'
 
-    hist = History(db_file)
-    hist.query = 'SELECT * FROM raw_candle;'
-    hist.retrieve_data()
-    dm = DM(hist.df)
-    dm.apply()
-
-    print(hist.df.head())
-
-    hist.df.to_csv('dm_test.csv')
-
-
-
-
-
-
+    hist = get_data(db_file, 'SELECT * FROM raw_candle;')
+    apply_dm(hist)
 

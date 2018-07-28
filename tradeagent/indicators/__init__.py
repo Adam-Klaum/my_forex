@@ -1,1 +1,1 @@
-from .indicators import DM
+from .indicators import apply_dm
