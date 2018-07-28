@@ -16,10 +16,7 @@ def get_data(db_file, query):
     if not Path(db_file).is_file():
             raise FileNotFoundError
 
-    try:
-        df = read_sql_query(query, db_connect(db_file))
-    except DatabaseError as e:
-        raise
+    df = read_sql_query(query, db_connect(db_file))
 
     # Converting all price columns to integers based on their instrument multiplier
 

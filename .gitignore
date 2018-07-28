@@ -6,3 +6,4 @@ data/
 .pytest_cache
 tradeagent.conf
 *.sqlite3
+*.csv
