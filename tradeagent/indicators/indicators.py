@@ -1,145 +1,127 @@
 import numpy as np
-np.seterr(divide='ignore', invalid='ignore')
+import numba
+#np.seterr(divide='ignore', invalid='ignore')
 
 
-def roll_column(column, df, return_orig=True):
+@numba.jit(nopython=True)
+def avg_tr_vec(atr, tr, period):
 
-    column = df[column].values
-    column_prev = np.roll(column, 1)
-    column_prev[0] = 0
-    column[0] = 0
+    for i in range(period, len(atr)):
+        atr[i] = round((atr[i - 1] * (period - 1) + tr[i]) / period)
 
-    if return_orig:
-        return column, column_prev
-    else:
-        return column_prev
+    return atr
 
 
-def apply_adx(df, period=14):
+@numba.jit(nopython=True)
+def avg_dx_vec(adx, dx, period):
 
-    # Apply Directional Movement indicators (+DM, -DM) to each row of the Data Frame"""
+    for i in range(period * 2, len(adx)):
+        adx[i] = round((adx[i - 1] * (period - 1) + dx[i]) / period)
+
+    return adx
+
+
+@numba.jit(nopython=True)
+def smooth_vec(smooth, tr, period):
+
+    for i in range(period, len(smooth)):
+        smooth[i] = round(smooth[i - 1] - smooth[i - 1]/period + tr[i])
+
+    return smooth
+
+
+def apply_adx(df, name, period=14):
+
+    """Apply Wilder's ADX indicator to a dataframe of OHLC prices
+
+    Do all of the required intermediate calculations to calculate Wilder's ADX/DMI
+    indicator given bid and ask ohlc data
+
+    This function expects the following columns to be present in the passed-in dataframe
+    where <name> is a prefix like bid, ask, etc.
+
+    | <name>_open    uint32
+    | <name>_high    uint32
+    | <name>_low     uint32
+    | <name>_close   uint32
+
+    :param df: Dataframe containing price information
+    :param name: Prefix of the ohlc column names (i.e. bid, ask etc.)
+    :param period: Period used for all ADX calculations.  Wilder recommends 14
+    :return: None
+    """
+
+    # Apply Directional Movement indicators (+DM, -DM) to each row of the Data Frame
+
+    new_cols = ['+DM', '-DM', 'TR', 'ATR', 'smooth TR', 'smooth +DM', 'smooth -DM', '+DI', '-DI', 'DX', 'ADX']
 
     df_length = df.shape[0]
 
-    bid_high, bid_high_prev = roll_column('bid_high', df)
-    bid_low, bid_low_prev = roll_column('bid_low', df)
-    ask_high, ask_high_prev = roll_column('ask_high', df)
-    ask_low, ask_low_prev = roll_column('ask_low', df)
+    high_diff = np.subtract(df[name + '_high'].values, df[name + '_high'].shift(1).values).clip(0)
+    high_diff[0] = 0
 
-    bid_high_diff = np.subtract(bid_high, bid_high_prev).clip(0)
-    bid_low_diff = np.subtract(bid_low, bid_low_prev).clip(0)
-    ask_high_diff = np.subtract(ask_low, ask_low_prev).clip(0)
-    ask_low_diff = np.subtract(ask_high, ask_high_prev).clip(0)
+    low_diff = np.subtract(df[name + '_low'].values, df[name + '_low'].shift(1).values).clip(0)
+    low_diff[0] = 0
 
-    bid_high_diff = np.ma.array(bid_high_diff, mask=bid_high_diff > bid_low_diff)
-    bid_low_diff = np.ma.array(bid_low_diff, mask=bid_low_diff > bid_high_diff)
-    ask_high_diff = np.ma.array(ask_high_diff, mask=ask_high_diff > ask_low_diff)
-    ask_low_diff = np.ma.array(ask_low_diff, mask=ask_low_diff > ask_high_diff)
+    high_diff = np.ma.array(high_diff, mask=high_diff > low_diff)
+    low_diff = np.ma.array(low_diff, mask=low_diff > high_diff)
 
-    bid_plus_dm = bid_high_diff.filled(bid_high_diff)
-    bid_minus_dm = bid_low_diff.filled(bid_low_diff)
-    ask_plus_dm = ask_high_diff.filled(ask_high_diff)
-    ask_minus_dm = ask_low_diff.filled(ask_low_diff)
+    df[name + ' +DM'] = high_diff.filled(high_diff)
+    df[name + ' -DM'] = low_diff.filled(low_diff)
 
-    # Apply True Range (TR) to each row of the Data Frame
+    # Adding True Range (TR) indicator
 
-    bid_prev_close = roll_column('bid_close', df, False)
-    bid_current_high = df.bid_high.values
-    bid_current_high[0] = 0
-    bid_current_low = df.bid_low.values
-    bid_current_low[0] = 0
+    df[name + ' TR'] = np.maximum(np.maximum(
+        np.subtract(df[name + '_high'].values, df[name + '_low'].values),
+        np.abs(np.subtract(df[name + '_high'].values, df[name + '_close'].shift(1).values))),
+        np.abs(np.subtract(df[name + '_low'].values, df[name + '_close'].shift(1).values)))
 
-    ask_prev_close = roll_column('ask_close', df, False)
-    ask_current_high = df.ask_high.values
-    ask_current_high[0] = 0
-    ask_current_low = df.ask_low.values
-    ask_current_low[0] = 0
+    # Adding Average True Range (ATR) and smoothed True Range (TR) indicators
 
-    bid_tr = np.maximum(np.maximum(np.subtract(bid_current_high, bid_current_low),
-                                   np.abs(np.subtract(bid_current_high, bid_prev_close))),
-                        np.abs(np.subtract(bid_current_low, bid_prev_close)))
+    smooth_tr = np.zeros(df_length)
+    atr = np.zeros(df_length)
+    smooth_plus_dm = np.zeros(df_length)
+    smooth_minus_dm = np.zeros(df_length)
+    adx = np.zeros(df_length)
 
-    ask_tr = np.maximum(np.maximum(np.subtract(ask_current_high, ask_current_low),
-                                   np.abs(np.subtract(ask_current_high, ask_prev_close))),
-                        np.abs(np.subtract(ask_current_low, ask_prev_close)))
+    atr[period - 1] = round(df[name + ' TR'][0:period].mean())
+    smooth_tr[period - 1] = df[name + ' TR'][0:period].sum()
+    smooth_plus_dm[period - 1] = df[name + ' +DM'][0:period].sum()
+    smooth_minus_dm[period - 1] = df[name + ' -DM'][0:period].sum()
 
-    # Apply Average True Range (ATR) to each row of the Data Frame
-    # Apply smoothing to the True Range (TR) indicator
+    df[name + ' ATR'] = avg_tr_vec(atr, df[name + ' TR'].values, period)
 
-    bid_smooth_tr = np.zeros(df_length)
-    bid_atr = np.zeros(df_length)
-    bid_smooth_plus_dm = np.zeros(df_length)
-    bid_smooth_minus_dm = np.zeros(df_length)
-    bid_adx = np.zeros(df_length)
+    df[name + ' smooth TR'] = smooth_vec(smooth_tr, df[name + ' TR'].values, period)
+    df[name + ' smooth +DM'] = smooth_vec(smooth_plus_dm, df[name + ' +DM'].values, period)
+    df[name + ' smooth -DM'] = smooth_vec(smooth_minus_dm, df[name + ' -DM'].values, period)
 
-    ask_smooth_tr = np.zeros(df_length)
-    ask_atr = np.zeros(df_length)
-    ask_smooth_plus_dm = np.zeros(df_length)
-    ask_smooth_minus_dm = np.zeros(df_length)
-    ask_adx = np.zeros(df_length)
+    # Adding +DI and -DI indicators
 
-    bid_atr[period - 1] = round(np.mean(bid_tr[0:period]))
-    bid_smooth_tr[period - 1] = sum(bid_tr[0:period])
-    bid_smooth_plus_dm[period - 1] = sum(bid_plus_dm[0:period])
-    bid_smooth_minus_dm[period - 1] = sum(bid_minus_dm[0:period])
+    df[name + ' +DI'] = np.round(np.divide(smooth_plus_dm,
+                                           smooth_tr,
+                                           out=np.zeros_like(smooth_tr),
+                                           where=smooth_tr!=0) * 100)
 
-    ask_atr[period - 1] = round(np.mean(ask_tr[0:period]))
-    ask_smooth_tr[period - 1] = sum(ask_tr[0:period])
-    ask_smooth_plus_dm[period - 1] = sum(ask_plus_dm[0:period])
-    ask_smooth_minus_dm[period - 1] = sum(ask_minus_dm[0:period])
+    df[name + ' -DI'] = np.round(np.divide(smooth_minus_dm,
+                                           smooth_tr,
+                                           out=np.zeros_like(smooth_tr),
+                                           where=smooth_tr!=0) * 100)
 
-    for i in range(period, df_length):
-        bid_atr[i] = round((bid_atr[i - 1] * (period - 1) + bid_tr[i]) / period)
-        bid_smooth_tr[i] = round(bid_smooth_tr[i - 1] - bid_smooth_tr[i - 1]/period + bid_tr[i])
-        bid_smooth_plus_dm[i] = round(bid_smooth_plus_dm[i - 1] - bid_smooth_plus_dm[i - 1]/period + bid_plus_dm[i])
-        bid_smooth_minus_dm[i] = round(bid_smooth_minus_dm[i - 1] - bid_smooth_minus_dm[i - 1]/period + bid_minus_dm[i])
+    # Adding DX indicator
 
-        ask_atr[i] = round((ask_atr[i - 1] * (period - 1) + ask_tr[i]) / period)
-        ask_smooth_tr[i] = round(ask_smooth_tr[i - 1] - ask_smooth_tr[i - 1]/period + ask_tr[i])
-        ask_smooth_plus_dm[i] = round(ask_smooth_plus_dm[i - 1] - ask_smooth_plus_dm[i - 1]/period + ask_plus_dm[i])
-        ask_smooth_minus_dm[i] = round(ask_smooth_minus_dm[i - 1] - ask_smooth_minus_dm[i - 1]/period + ask_minus_dm[i])
+    dx_a = np.subtract(df[name + ' +DI'], df[name + ' -DI'])
+    dx_b = np.add(df[name + ' +DI'], df[name + ' -DI'])
+    df[name + ' DX'] = np.round(np.abs(np.divide(dx_a,
+                                                 dx_b,
+                                                 out=np.zeros_like(dx_a),
+                                                 where=dx_b!=0)) * 100)
 
-    bid_plus_di = np.round(np.divide(bid_smooth_plus_dm, bid_smooth_tr) * 100)
-    bid_minus_di = np.round(np.divide(bid_smooth_minus_dm, bid_smooth_tr) * 100)
-    ask_plus_di = np.round(np.divide(ask_smooth_plus_dm, ask_smooth_tr) * 100)
-    ask_minus_di = np.round(np.divide(ask_smooth_minus_dm, ask_smooth_tr) * 100)
+    adx[period * 2 - 1] = round(df[name + ' DX'][period - 1:period * 2].mean())
 
-    bid_dx_a = np.subtract(bid_plus_di, bid_minus_di)
-    bid_dx_b = np.add(bid_plus_di, bid_minus_di)
-    bid_dx = np.round(np.abs(np.divide(bid_dx_a, bid_dx_b, out=np.zeros_like(bid_dx_a), where=bid_dx_b!=0)) * 100)
+    df[name + ' ADX'] = avg_dx_vec(adx, df[name + ' DX'].values, period)
 
-    ask_dx_a = np.subtract(ask_plus_di, ask_minus_di)
-    ask_dx_b = np.add(ask_plus_di, ask_minus_di)
-    ask_dx = np.round(np.abs(np.divide(ask_dx_a, ask_dx_b, out=np.zeros_like(ask_dx_a), where=ask_dx_b!=0)) * 100)
+    # Saving memory with more appropriate data types
 
-    bid_adx[(period - 1) * 2] = round(np.mean(bid_dx[period - 1:period * 2]))
-    ask_adx[(period - 1) * 2] = round(np.mean(ask_dx[period - 1:period * 2]))
-
-    for i in range(period * 2, df_length):
-
-        bid_adx[i] = round((bid_adx[i - 1] * (period - 1) + bid_dx[i])/period)
-        ask_adx[i] = round((ask_adx[i - 1] * (period - 1) + ask_dx[i])/period)
-
-    df['bid TR'] = bid_tr
-    df['bid TR Smooth'] = bid_smooth_tr
-    df['bid ATR'] = bid_atr
-    df['bid +DM'] = bid_plus_dm
-    df['bid -DM'] = bid_minus_dm
-    df['bid +DM Smooth'] = bid_smooth_plus_dm
-    df['bid -DM Smooth'] = bid_smooth_minus_dm
-    df['bid +DI'] = bid_plus_di
-    df['bid -DI'] = bid_minus_di
-    df['bid DX'] = bid_dx
-    df['bid ADX'] = bid_adx
-
-    df['ask TR'] = ask_tr
-    df['ask TR Smooth'] = ask_smooth_tr
-    df['ask ATR'] = ask_atr
-    df['ask +DM'] = ask_plus_dm
-    df['ask -DM'] = ask_minus_dm
-    df['ask +DM Smooth'] = ask_smooth_plus_dm
-    df['ask -DM Smooth'] = ask_smooth_minus_dm
-    df['ask +DI'] = ask_plus_di
-    df['ask -DI'] = ask_minus_di
-    df['ask DX'] = ask_dx
-    df['ask ADX'] = ask_adx
+    for col in new_cols:
+        df[name + ' ' + col].fillna(0, inplace=True)
+        df[name + ' ' + col] = df[name + ' ' + col].astype('uint16')

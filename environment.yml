@@ -4,3 +4,4 @@ dependencies:
 - pandas
 - PyYAML
 - v20
+- numba
