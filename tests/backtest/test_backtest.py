@@ -1,11 +1,9 @@
 from pytest import raises, fixture
 from tradeagent.backtest import get_data
 from tradeagent.config import root
-from pandas.io.sql import DatabaseError
-from tradeagent.indicators import apply_adx
+from tradeagent.indicators import apply_adx, apply_sma, apply_ema
 
 csv_file = root / 'tests' / 'backtest' / 'raw_candle.csv'
-
 
 @fixture
 def hist_data():
@@ -30,7 +28,6 @@ def test_spread(hist_data):
 def test_adx_indicator(hist_data):
 
     apply_adx(hist_data, 'bid')
-    hist_data.to_csv('raw_candle_test.csv')
 
     assert 534 == hist_data['bid +DM'].sum()
     assert 588 == hist_data['bid -DM'].sum()
@@ -44,4 +41,20 @@ def test_adx_indicator(hist_data):
     assert 1126 == hist_data['bid DX'].sum()
     assert 1103 == hist_data['bid ADX'].sum()
 
-    #hist_data.iloc[0:500].to_csv('adx_test.csv')
+
+def test_sma_indicator(hist_data):
+
+    apply_sma(hist_data, 'bid_close', 20)
+
+    assert 9728135 == hist_data['bid_close 20 SMA'].sum()
+
+
+def test_ema_indicator(hist_data):
+
+    apply_ema(hist_data, 'bid_close', 20)
+
+    assert 12008781 == hist_data['bid_close 20 EMA'].sum()
+
+    hist_data.to_csv('raw_candle_test.csv')
+
+

@@ -1,10 +1,60 @@
 import numpy as np
 import numba
-#np.seterr(divide='ignore', invalid='ignore')
+
+
+def apply_sma(df, name, period):
+    """ Calculate Simple Moving Average (SMA) against input data
+
+    Take a pandas dataframe as input and add a new column for SMA
+    based on the specified input column
+
+    Note: The function operates directly on the passed in dataframe, not a copy of it.
+
+    :param df: Dataframe upon which to operate
+    :param name: Column to use for SMA calculation
+    :param period: Period to use for calculating SMA
+    :return:
+    """
+
+    new_col = '{} {} SMA'.format(name, period)
+
+    df[new_col] = df[name].rolling(window=period).mean()
+    df[new_col].fillna(0, inplace=True)
+    df[new_col] = df[new_col].round()
+    df[new_col] = df[new_col].astype('uint32')
+
+
+def apply_ema(df, name, period):
+    """ Calculate Exponential Moving Average (EMA) against input data
+
+    Take a pandas dataframe as input and add a new column for EMA
+    based on the specified input column
+
+    Note: The function operates directly on the passed in dataframe, not a copy of it.
+
+    :param df: Dataframe upon which to operate
+    :param name: Column to use for SMA calculation
+    :param period: Period to use for calculating SMA
+    :return:
+    """
+
+    new_col = '{} {} EMA'.format(name, period)
+
+    df[new_col] = df[name].ewm(com=period).mean()
+    df[new_col].fillna(0, inplace=True)
+    df[new_col] = df[new_col].round()
+    df[new_col] = df[new_col].astype('uint32')
 
 
 @numba.jit(nopython=True)
-def avg_tr_vec(atr, tr, period):
+def avg_tr_vec(atr, tr, period=14):
+    """Vectorized function to calculate Average True Range (ATR)
+
+    :param atr: Pre-created numpy array to hold ATR values
+    :param tr:  Numpy array containing True Range (TR) values
+    :param period: Time period used for averaging, 14 recommended
+    :return: None
+    """
 
     for i in range(period, len(atr)):
         atr[i] = round((atr[i - 1] * (period - 1) + tr[i]) / period)
@@ -13,7 +63,14 @@ def avg_tr_vec(atr, tr, period):
 
 
 @numba.jit(nopython=True)
-def avg_dx_vec(adx, dx, period):
+def avg_dx_vec(adx, dx, period=14):
+    """ Vectorized function to calculate Average Directional Index (ADX)
+
+    :param adx: Pre-created numpy array to hold ADX values
+    :param dx:  Numpy array containing Directional Movement Index (DX) values
+    :param period: Time period used for averaging, 14 recommended
+    :return: None
+    """
 
     for i in range(period * 2, len(adx)):
         adx[i] = round((adx[i - 1] * (period - 1) + dx[i]) / period)
@@ -22,10 +79,20 @@ def avg_dx_vec(adx, dx, period):
 
 
 @numba.jit(nopython=True)
-def smooth_vec(smooth, tr, period):
+def smooth_vec(smooth, input_data, period=14):
+    """ Vectorized function to smooth time series data
+
+    Technique specifically for smoothing True Range (TR) and Directional Movement (-DM, +DM)
+    data for Wilders ADX indicator
+
+    :param smooth: Pre-created numpy array to hold target values
+    :param input_data: Pre-created numpy array containing the values to smooth
+    :param period: Time period used for smoothing, 14 recommended
+    :return:
+    """
 
     for i in range(period, len(smooth)):
-        smooth[i] = round(smooth[i - 1] - smooth[i - 1]/period + tr[i])
+        smooth[i] = round(smooth[i - 1] - smooth[i - 1]/period + input_data[i])
 
     return smooth
 
@@ -125,3 +192,7 @@ def apply_adx(df, name, period=14):
     for col in new_cols:
         df[name + ' ' + col].fillna(0, inplace=True)
         df[name + ' ' + col] = df[name + ' ' + col].astype('uint16')
+
+
+
+

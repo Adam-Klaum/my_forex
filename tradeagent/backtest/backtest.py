@@ -4,6 +4,15 @@ from tradeagent.config import config
 
 
 def get_data(instrument, csv_file):
+    """ Read in a CSV file of Forex prices in the specified format and create a pandas dataframe
+
+    Also calculate the spread for each line and set data types for the dataframe to
+    optimize memory usage
+
+    :param instrument: Forex pair contained in the data (i.e. EUR_USD)
+    :param csv_file: Location of the CSV file
+    :return: Dataframe
+    """
 
     column_types = {'instrument': 'category',
                     'bid_open': 'float32',

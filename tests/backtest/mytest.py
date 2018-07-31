@@ -7,7 +7,6 @@ import pandas as pd
 
 def full_data():
 
-    # db_file = root / 'tradeagent.sqlite3'
     csv_file = root / 'raw_candle.csv'
     hist = get_data('EUR_USD', csv_file)
 
@@ -24,7 +23,6 @@ def test_calc():
                                 1, 18, 18, 4, 7,
                                 4, 18, 19, 13, 16,
                                 11, 1, 8, 1, 9]})
-
 
     # Empty array to hold calculated values
     calc_data = np.empty((20, 1))
