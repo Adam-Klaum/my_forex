@@ -1,1 +1,1 @@
-from .candle import Candle, CandleMaker
+from .candle import Candle, CandleMaker, candle_converter

@@ -1,6 +1,7 @@
 from tradeagent.backtest import get_data
 from tradeagent.config import root
 from tradeagent.indicators import apply_adx
+from tradeagent.candle import candle_converter
 import numpy as np
 import pandas as pd
 
@@ -9,6 +10,8 @@ def full_data():
 
     csv_file = root / 'raw_candle.csv'
     hist = get_data('EUR_USD', csv_file)
+
+    new_df = candle_converter(hist, '30T')
 
     apply_adx(hist, 'bid')
     apply_adx(hist, 'ask')
@@ -38,7 +41,6 @@ def test_calc():
         else:
             calc_data[idx] = (calc_data[idx - 1] * (period - 1) + df.base.iloc[idx]) / period
 
-    # Adding the column to the dataframe
     df['calculated'] = calc_data
 
     print(df)

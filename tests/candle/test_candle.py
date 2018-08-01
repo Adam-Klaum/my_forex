@@ -1,8 +1,33 @@
 from pytest import *
-from tradeagent.candle import Candle, CandleMaker
+from tradeagent.candle import Candle, CandleMaker, candle_converter
+from tradeagent.backtest import get_data
 from datetime import datetime
 from decimal import Decimal, DecimalException
 from multiprocessing import Queue
+from tradeagent.config import root
+
+csv_file = root / 'tests' / 'backtest' / 'raw_candle.csv'
+
+
+@fixture
+def hist_data():
+
+    hist = get_data('EUR_USD', csv_file)
+    return hist
+
+
+def test_candle_converter(hist_data):
+
+    new_df = candle_converter(hist_data, '30T')
+
+    assert 600441 == new_df.bid_open.sum()
+    assert 600668 == new_df.bid_high.sum()
+    assert 600201 == new_df.bid_low.sum()
+    assert 600531 == new_df.bid_close.sum()
+
+    new_df.to_csv('candle_converter.csv')
+
+    return
 
 
 def test_candle_creation():
